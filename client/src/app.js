@@ -350,6 +350,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     state.activeScreenOwner = isLocal ? state.peerId : ownerId;
     el.emptyScreenState.style.display = 'none';
     el.screenVideoElement.style.display = 'block';
+    el.screenVideoElement.muted = !!isLocal || audio.isDeafened;
     el.screenVideoElement.srcObject = stream;
     el.screenVideoElement.play().catch(e => console.warn(e));
 

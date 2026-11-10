@@ -8,6 +8,7 @@ class ScreenShareManager {
     this.videoTrack = null;
     this.audioTrack = null;
     this.isSharing = false;
+    this.isStarting = false;
     this.currentPreset = '720p'; // '720p' or '1080p'
     this.captureAudio = false;
     this.listeners = new Map();
@@ -70,6 +71,8 @@ class ScreenShareManager {
   }
 
   async start(preset = '720p', sourceId = null, captureAudio = false) {
+    if (this.isStarting) return;
+    this.isStarting = true;
     if (this.isSharing) {
       await this.stop();
     }
@@ -145,10 +148,12 @@ class ScreenShareManager {
 
       console.log(`[ScreenShareManager] Screen sharing active (${preset} @ 30fps, audio: ${!!this.audioTrack}).`);
       this.emit('started', this.screenStream, this.videoTrack, this.audioTrack);
+      this.isStarting = false;
       return this.screenStream;
     } catch (err) {
       console.warn('[ScreenShareManager] Screen share request cancelled or failed:', err);
       this.isSharing = false;
+      this.isStarting = false;
       this.emit('error', err);
       throw err;
     }
