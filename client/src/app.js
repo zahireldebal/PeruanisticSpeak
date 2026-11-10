@@ -6,11 +6,13 @@
 document.addEventListener('DOMContentLoaded', async () => {
   console.log('[App] Initializing PeruanisticSPEAK...');
 
+  const DEFAULT_SERVER_URL = 'wss://peruanisticspeak.onrender.com';
+
   // State
   const state = {
     peerId: localStorage.getItem('ps_peer_id') || 'peer_' + Math.random().toString(36).substring(2, 9),
     username: localStorage.getItem('ps_username') || 'Gamer_' + Math.floor(100 + Math.random() * 900),
-    serverUrl: localStorage.getItem('ps_server_url') || 'ws://localhost:3001',
+    serverUrl: localStorage.getItem('ps_server_url') || DEFAULT_SERVER_URL,
     currentRoom: 'voz-1',
     isConnectedToVoice: true,
     activeScreenOwner: null,
@@ -36,6 +38,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Sidebar & Status
     serverStatusDot: document.getElementById('serverStatusDot'),
     serverTitleText: document.getElementById('serverTitleText'),
+    btnServerConnectHeader: document.getElementById('btnServerConnectHeader'),
+    btnChangeServerPill: document.getElementById('btnChangeServerPill'),
     voiceUserCountBadge: document.getElementById('voiceUserCountBadge'),
     channelItems: document.querySelectorAll('.channel-item'),
     participantsVoz1: document.getElementById('participantsVoz1'),
@@ -140,11 +144,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     console.warn('[App] Could not initialize mic immediately (user may grant on click):', err);
   }
 
-  // Connect Signaling Server
-  connectSignaling();
-
+  // Connect Signaling Server (or prompt welcome connect screen if not configured)
   function connectSignaling() {
     signaling.connect(state.serverUrl);
+  }
+
+  if (!localStorage.getItem('ps_configured')) {
+    openConnectModal();
+  } else {
+    connectSignaling();
   }
 
   signaling.on('connected', () => {
@@ -588,29 +596,49 @@ document.addEventListener('DOMContentLoaded', async () => {
   el.serverTitleText.addEventListener('click', () => openConnectModal());
   el.serverStatusDot.style.cursor = 'pointer';
   el.serverStatusDot.addEventListener('click', () => openConnectModal());
+  if (el.btnChangeServerPill) el.btnChangeServerPill.addEventListener('click', () => openConnectModal());
+  if (el.btnServerConnectHeader) el.btnServerConnectHeader.addEventListener('click', () => openConnectModal());
 
   function openConnectModal() {
     el.quickInputUsername.value = state.username;
-    el.quickInputServerUrl.value = state.serverUrl;
+    el.quickInputServerUrl.value = state.serverUrl || DEFAULT_SERVER_URL;
     el.connectServerModal.classList.remove('hidden');
+    setTimeout(() => {
+      if (el.quickInputUsername) el.quickInputUsername.focus();
+    }, 150);
   }
 
   el.btnCloseConnectModal.addEventListener('click', () => el.connectServerModal.classList.add('hidden'));
 
-  el.btnQuickConnectSubmit.addEventListener('click', () => {
+  el.btnQuickConnectSubmit.addEventListener('click', (e) => {
+    if (e && e.preventDefault) e.preventDefault();
     const user = el.quickInputUsername.value.trim();
-    const url = el.quickInputServerUrl.value.trim();
+    let url = el.quickInputServerUrl.value.trim() || DEFAULT_SERVER_URL;
+
+    // Automatically convert https:// to wss:// or http:// to ws://
+    if (url.startsWith('https://')) {
+      url = url.replace('https://', 'wss://');
+    } else if (url.startsWith('http://')) {
+      url = url.replace('http://', 'ws://');
+    } else if (!url.startsWith('ws://') && !url.startsWith('wss://')) {
+      url = 'wss://' + url;
+    }
+
     if (user) {
       state.username = user;
       localStorage.setItem('ps_username', user);
       el.localUsernameDisplay.textContent = user;
+      el.localAvatar.textContent = user.charAt(0).toUpperCase();
+      el.inputUsername.value = user;
     }
-    if (url) {
-      state.serverUrl = url;
-      localStorage.setItem('ps_server_url', url);
-      signaling.connect(url);
-    }
+
+    state.serverUrl = url;
+    localStorage.setItem('ps_server_url', url);
+    localStorage.setItem('ps_configured', 'true');
+    el.inputServerUrl.value = url;
+
     el.connectServerModal.classList.add('hidden');
+    signaling.connect(url);
   });
 
   // Settings Modal Controls
