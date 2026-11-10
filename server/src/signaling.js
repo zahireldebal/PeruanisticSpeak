@@ -9,8 +9,8 @@ class SignalingServer {
   constructor(options = {}) {
     this.port = options.port || process.env.PORT || 3001;
     this.host = options.host || process.env.HOST || '0.0.0.0';
-    this.rooms = new Map(); // roomId -> Map(peerId -> { ws, username, isSharingScreen, isMuted, isDeafened, isSpeaking })
-    this.peers = new Map(); // ws -> { peerId, username, roomId, isAlive }
+    this.rooms = new Map(); // roomId -> Map(peerId -> { ws, username, avatar, isSharingScreen, isMuted, isDeafened, isSpeaking })
+    this.peers = new Map(); // ws -> { peerId, username, avatar, roomId, isAlive }
     this.server = null;
     this.wss = null;
     this.heartbeatInterval = null;
@@ -40,6 +40,7 @@ class SignalingServer {
         const peerState = {
           peerId: null,
           username: 'Gamer',
+          avatar: null,
           roomId: null,
           isAlive: true,
           isSharingScreen: false,
@@ -48,6 +49,12 @@ class SignalingServer {
           isSpeaking: false
         };
         this.peers.set(ws, peerState);
+
+        // Send current server-wide channels state immediately on connection
+        this.send(ws, {
+          type: 'server-state',
+          rooms: this.getServerState()
+        });
 
         ws.on('pong', () => {
           peerState.isAlive = true;
@@ -72,10 +79,11 @@ class SignalingServer {
         });
       });
 
-      // Keepalive heartbeat every 30 seconds
+      // Keepalive heartbeat every 15 seconds to immediately catch disconnected/zombie peers
       this.heartbeatInterval = setInterval(() => {
         for (const [ws, peerState] of this.peers.entries()) {
           if (!peerState.isAlive) {
+            console.log(`[Signaling] Heartbeat timeout for peer ${peerState.peerId || 'unknown'}, terminating.`);
             ws.terminate();
             this.handleDisconnect(ws);
             continue;
@@ -83,7 +91,7 @@ class SignalingServer {
           peerState.isAlive = false;
           ws.ping();
         }
-      }, 30000);
+      }, 15000);
 
       this.server.listen(this.port, this.host, () => {
         console.log(`[Signaling] PeruanisticSPEAK signaling server running on port ${this.port}`);
@@ -92,14 +100,59 @@ class SignalingServer {
     });
   }
 
+  getServerState() {
+    const channelUsers = {};
+    for (const [roomId, room] of this.rooms.entries()) {
+      channelUsers[roomId] = [];
+      for (const [peerId, user] of room.entries()) {
+        channelUsers[roomId].push({
+          peerId: user.peerId,
+          username: user.username,
+          avatar: user.avatar,
+          isSharingScreen: user.isSharingScreen,
+          isMuted: user.isMuted,
+          isDeafened: user.isDeafened,
+          isSpeaking: user.isSpeaking
+        });
+      }
+    }
+    return channelUsers;
+  }
+
+  broadcastServerState() {
+    const payload = {
+      type: 'server-state',
+      rooms: this.getServerState()
+    };
+    for (const ws of this.peers.keys()) {
+      this.send(ws, payload);
+    }
+  }
+
   handleMessage(ws, message) {
     const peerState = this.peers.get(ws);
     if (!peerState) return;
 
     switch (message.type) {
       case 'join': {
-        const { roomId, peerId, username } = message;
+        const { roomId, peerId, username, avatar } = message;
         if (!roomId || !peerId) return;
+
+        const requestedNick = (username || `Gamer_${peerId.slice(0, 4)}`).trim();
+
+        // Enforce unique nickname across all active peers
+        for (const [otherWs, otherState] of this.peers.entries()) {
+          if (otherWs !== ws && otherState.peerId && otherState.peerId !== peerId) {
+            if (otherState.username.toLowerCase() === requestedNick.toLowerCase()) {
+              this.send(ws, {
+                type: 'error',
+                code: 'nick-taken',
+                message: `El apodo "${requestedNick}" ya está en uso. Por favor elige otro.`
+              });
+              return;
+            }
+          }
+        }
 
         // Leave any existing room first
         if (peerState.roomId) {
@@ -107,7 +160,8 @@ class SignalingServer {
         }
 
         peerState.peerId = peerId;
-        peerState.username = username || `Gamer_${peerId.slice(0, 4)}`;
+        peerState.username = requestedNick;
+        peerState.avatar = avatar || null;
         peerState.roomId = roomId;
 
         if (!this.rooms.has(roomId)) {
@@ -120,7 +174,8 @@ class SignalingServer {
         this.broadcastToRoom(roomId, ws, {
           type: 'user-joined',
           peerId: peerState.peerId,
-          username: peerState.username
+          username: peerState.username,
+          avatar: peerState.avatar
         });
 
         // Add current peer to the room
@@ -128,6 +183,7 @@ class SignalingServer {
           ws,
           peerId: peerState.peerId,
           username: peerState.username,
+          avatar: peerState.avatar,
           isSharingScreen: peerState.isSharingScreen,
           isMuted: peerState.isMuted,
           isDeafened: peerState.isDeafened,
@@ -141,6 +197,7 @@ class SignalingServer {
             existingPeers.push({
               peerId: user.peerId,
               username: user.username,
+              avatar: user.avatar,
               isSharingScreen: user.isSharingScreen,
               isMuted: user.isMuted,
               isDeafened: user.isDeafened,
@@ -154,6 +211,9 @@ class SignalingServer {
           roomId,
           peers: existingPeers
         });
+
+        // Broadcast updated presence to all connected clients
+        this.broadcastServerState();
         break;
       }
 
@@ -187,6 +247,26 @@ class SignalingServer {
         break;
       }
 
+      case 'request-renegotiate': {
+        const { targetPeerId } = message;
+        this.forwardToPeer(peerState.roomId, targetPeerId, {
+          type: 'request-renegotiate',
+          senderPeerId: peerState.peerId
+        });
+        break;
+      }
+
+      case 'watching-screen': {
+        const { targetPeerId, isWatching } = message;
+        this.forwardToPeer(peerState.roomId, targetPeerId, {
+          type: 'viewer-update',
+          viewerPeerId: peerState.peerId,
+          viewerUsername: peerState.username,
+          isWatching: isWatching !== false
+        });
+        break;
+      }
+
       case 'screen-state': {
         peerState.isSharingScreen = !!message.isSharingScreen;
         this.updateRoomPeer(peerState);
@@ -195,6 +275,7 @@ class SignalingServer {
           peerId: peerState.peerId,
           isSharingScreen: peerState.isSharingScreen
         });
+        this.broadcastServerState();
         break;
       }
 
@@ -202,23 +283,29 @@ class SignalingServer {
         if (typeof message.isMuted === 'boolean') peerState.isMuted = message.isMuted;
         if (typeof message.isDeafened === 'boolean') peerState.isDeafened = message.isDeafened;
         if (typeof message.isSpeaking === 'boolean') peerState.isSpeaking = message.isSpeaking;
+        if (message.avatar) peerState.avatar = message.avatar;
         this.updateRoomPeer(peerState);
         this.broadcastToRoom(peerState.roomId, ws, {
           type: 'peer-state',
           peerId: peerState.peerId,
           isMuted: peerState.isMuted,
           isDeafened: peerState.isDeafened,
-          isSpeaking: peerState.isSpeaking
+          isSpeaking: peerState.isSpeaking,
+          avatar: peerState.avatar
         });
+        this.broadcastServerState();
         break;
       }
 
       case 'chat-message': {
-        if (!peerState.roomId || (!message.text && !message.image)) return;
-        this.broadcastToRoom(peerState.roomId, null, {
+        const targetRoom = message.roomId || peerState.roomId;
+        if (!targetRoom || (!message.text && !message.image)) return;
+        this.broadcastToRoom(targetRoom, null, {
           type: 'chat-message',
+          roomId: targetRoom,
           senderPeerId: peerState.peerId,
           username: peerState.username,
+          avatar: peerState.avatar,
           text: message.text ? String(message.text).slice(0, 1000) : '',
           image: message.image ? String(message.image) : null,
           timestamp: Date.now()
@@ -228,6 +315,7 @@ class SignalingServer {
 
       case 'leave': {
         this.leaveRoom(ws);
+        this.broadcastServerState();
         break;
       }
 
@@ -245,6 +333,7 @@ class SignalingServer {
       member.isMuted = peerState.isMuted;
       member.isDeafened = peerState.isDeafened;
       member.isSpeaking = peerState.isSpeaking;
+      member.avatar = peerState.avatar;
     }
   }
 
@@ -299,6 +388,7 @@ class SignalingServer {
   handleDisconnect(ws) {
     this.leaveRoom(ws);
     this.peers.delete(ws);
+    this.broadcastServerState();
   }
 
   close() {
@@ -326,4 +416,3 @@ if (require.main === module) {
 }
 
 module.exports = SignalingServer;
-

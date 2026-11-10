@@ -186,6 +186,28 @@ async function runTests() {
   const leftReceivedB = await leftPromiseB;
   assert(leftReceivedB.peerId === 'peer-a', 'Client B receives user-left when Client A disconnects');
 
+  // 11. Unique Nickname enforcement
+  const wsC = new WebSocket(`ws://127.0.0.1:${testPort}`);
+  await new Promise(r => wsC.on('open', r));
+
+  const errorPromiseC = new Promise((resolve) => {
+    wsC.on('message', (msg) => {
+      const parsed = JSON.parse(msg.toString());
+      if (parsed.type === 'error') resolve(parsed);
+    });
+  });
+
+  wsC.send(JSON.stringify({
+    type: 'join',
+    roomId: 'voz-1',
+    peerId: 'peer-c',
+    username: 'GamerB' // already taken by wsB!
+  }));
+
+  const errC = await errorPromiseC;
+  assert(errC.code === 'nick-taken', 'Server rejects duplicate nickname');
+  wsC.close();
+
   wsB.close();
   await server.close();
 
@@ -196,4 +218,3 @@ runTests().catch((err) => {
   console.error('Fatal test error:', err);
   process.exit(1);
 });
-
