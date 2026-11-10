@@ -13,7 +13,7 @@
     <div class="titlebar-title">
       <img src="public/logo.png" class="titlebar-logo" alt="Logo">
       <span>PeruanisticSPEAK</span>
-      <span class="titlebar-badge">v1.0.1</span>
+      <span class="titlebar-badge">v1.0.2</span>
     </div>
     <div class="titlebar-controls" id="windowControls">
       <button class="window-btn" id="btnMinimize" title="Minimizar">
@@ -129,7 +129,7 @@
             <div class="channel-participants" id="participantsVozAfk"></div>
           </div>
 
-          <!-- Text Channels Category (Per-channel chat) -->
+          <!-- Text Channels Category (single server-wide chat) -->
           <div class="channel-category">
             <div class="category-header">
               <span>Canales de Texto</span>
@@ -138,24 +138,6 @@
               <div class="channel-item-left">
                 <span style="font-weight:700; color:var(--text-muted);">#</span>
                 <span>general</span>
-              </div>
-            </div>
-            <div class="channel-item" data-text-channel="voz-1" id="textChannelVoz1">
-              <div class="channel-item-left">
-                <span style="font-weight:700; color:var(--text-muted);">#</span>
-                <span>voz-1</span>
-              </div>
-            </div>
-            <div class="channel-item" data-text-channel="voz-2" id="textChannelVoz2">
-              <div class="channel-item-left">
-                <span style="font-weight:700; color:var(--text-muted);">#</span>
-                <span>voz-2</span>
-              </div>
-            </div>
-            <div class="channel-item" data-text-channel="sala-afk" id="textChannelVozAfk">
-              <div class="channel-item-left">
-                <span style="font-weight:700; color:var(--text-muted);">#</span>
-                <span>sala-afk</span>
               </div>
             </div>
           </div>
@@ -268,7 +250,7 @@
 
           <!-- Bottom Actions Overlay -->
           <div class="screen-overlay-actions" id="screenOverlayActions" style="display:none;">
-            <button class="btn btn-secondary btn-sm" id="btnToggleFullscreen">Pantalla Completa</button>
+            <button class="btn btn-secondary btn-sm" id="btnToggleFullscreen" title="También con doble clic sobre el video">Pantalla Completa</button>
             <button class="btn btn-danger btn-sm" id="btnStopScreenShareOverlay" style="display:none;">Detener Transmisión</button>
           </div>
 

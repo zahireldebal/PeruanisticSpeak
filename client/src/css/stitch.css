@@ -644,6 +644,26 @@ button.watch-stream-btn:hover {
   object-fit: contain;
 }
 
+/* Fullscreen: fill the whole monitor (the 460px cap above is for the docked view) */
+.screen-stage:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  max-height: none;
+  min-height: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.screen-stage:fullscreen .screen-video {
+  width: 100%;
+  height: 100%;
+  max-height: none;
+}
+
+.screen-video {
+  cursor: pointer;
+}
+
 .screen-overlay-top {
   position: absolute;
   top: 12px;

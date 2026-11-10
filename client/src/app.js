@@ -5,7 +5,7 @@
  */
 
 document.addEventListener('DOMContentLoaded', async () => {
-  console.log('[App] Initializing PeruanisticSPEAK v1.0.1...');
+  console.log('[App] Initializing PeruanisticSPEAK v1.0.2...');
 
   const EMOJIS = [
     '😀', '😂', '🤣', '😎', '🔥', '💀', '🎮',
@@ -254,9 +254,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Chat history kept by the server (text channels are server-wide)
   signaling.on('chat-history', (channels) => {
-    for (const [channelId, messages] of Object.entries(channels || {})) {
-      mergeChatHistory(channelId, messages);
+    const all = [];
+    for (const messages of Object.values(channels || {})) {
+      if (Array.isArray(messages)) all.push(...messages);
     }
+    mergeChatHistory('general', all);
     loadChannelChatHistory(state.activeTextChannel);
   });
 
@@ -422,6 +424,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   function clearScreenStream() {
+    if (document.fullscreenElement === el.screenStage) {
+      document.exitFullscreen().catch(() => {});
+    }
     state.activeScreenOwner = null;
     el.screenVideoElement.srcObject = null;
     el.screenVideoElement.style.display = 'none';
@@ -887,12 +892,21 @@ document.addEventListener('DOMContentLoaded', async () => {
   el.btnCloseScreenPicker.addEventListener('click', () => el.screenPickerModal.classList.add('hidden'));
   el.btnCancelScreenPicker.addEventListener('click', () => el.screenPickerModal.classList.add('hidden'));
 
-  el.btnToggleFullscreen.addEventListener('click', () => {
+  function toggleScreenFullscreen() {
     if (!document.fullscreenElement) {
-      el.screenStage.requestFullscreen().catch(err => console.warn(err));
+      if (!el.screenVideoElement.srcObject) return;
+      el.screenStage.requestFullscreen().catch(err => console.warn('[App] Fullscreen failed:', err));
     } else {
       document.exitFullscreen().catch(err => console.warn(err));
     }
+  }
+
+  el.btnToggleFullscreen.addEventListener('click', toggleScreenFullscreen);
+  el.screenVideoElement.addEventListener('dblclick', toggleScreenFullscreen);
+
+  document.addEventListener('fullscreenchange', () => {
+    const isFs = document.fullscreenElement === el.screenStage;
+    el.btnToggleFullscreen.textContent = isFs ? 'Salir de Pantalla Completa' : 'Pantalla Completa';
   });
 
   // -------------------------------------------------------------
@@ -988,7 +1002,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const text = el.chatInput.value.trim();
     if (!text && !state.attachedImage) return;
 
-    signaling.sendChatMessage(text, state.attachedImage, state.activeTextChannel, {
+    signaling.sendChatMessage(text, state.attachedImage, 'general', {
       peerId: state.peerId,
       username: state.username,
       avatar: state.avatar
@@ -1002,7 +1016,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Incoming Chat Message (Feature 5 & 9)
   signaling.on('chat-message', (msg) => {
-    const targetRoom = msg.roomId || 'general';
+    // Single server-wide text channel. Messages from older clients addressed to
+    // #voz-1 / #voz-2 / #sala-afk are shown in #general too.
+    const targetRoom = 'general';
 
     // Play notification sound if message is from another user
     if (msg.senderPeerId !== state.peerId) {
