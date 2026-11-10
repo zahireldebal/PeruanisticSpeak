@@ -1,0 +1,93 @@
+/**
+ * PeruanisticSPEAK - Theme System (Dark & Light)
+ * Discord-inspired sleek gaming palette with high contrast and smooth transitions.
+ */
+
+:root,
+[data-theme="dark"] {
+  --bg-titlebar: #1e1f22;
+  --bg-servers: #1e1f22;
+  --bg-sidebar: #2b2d31;
+  --bg-main: #313338;
+  --bg-members: #2b2d31;
+  --bg-card: #232428;
+  --bg-card-hover: #2e3035;
+  --bg-input: #383a40;
+  --bg-hover: #35373c;
+  --bg-active: #404249;
+  --bg-modal: #313338;
+  --bg-modal-header: #2b2d31;
+  --bg-badge: #111214;
+  --bg-userpanel: #232428;
+
+  --text-primary: #f2f3f5;
+  --text-secondary: #949ba4;
+  --text-muted: #80848e;
+  --text-link: #00a8fc;
+
+  --border-color: #1f2023;
+  --border-subtle: rgba(255, 255, 255, 0.08);
+
+  --brand-color: #5865f2;
+  --brand-hover: #4752c4;
+  --brand-active: #3c45a5;
+
+  --danger-color: #da373c;
+  --danger-hover: #a12828;
+  --danger-bg: rgba(218, 55, 60, 0.15);
+
+  --success-color: #23a55a;
+  --speaking-color: #23a55a;
+  --speaking-glow: rgba(35, 165, 90, 0.5);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 4px 8px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.4);
+
+  --scrollbar-thumb: #1a1b1e;
+  --scrollbar-track: #2b2d31;
+}
+
+[data-theme="light"] {
+  --bg-titlebar: #e3e5e8;
+  --bg-servers: #e3e5e8;
+  --bg-sidebar: #f2f3f5;
+  --bg-main: #ffffff;
+  --bg-members: #f2f3f5;
+  --bg-card: #e3e5e8;
+  --bg-card-hover: #d7d9dc;
+  --bg-input: #ebedef;
+  --bg-hover: #e0e2e5;
+  --bg-active: #d7d9dc;
+  --bg-modal: #ffffff;
+  --bg-modal-header: #f2f3f5;
+  --bg-badge: #d1d4d8;
+  --bg-userpanel: #ebedef;
+
+  --text-primary: #060607;
+  --text-secondary: #4e5058;
+  --text-muted: #5c5e66;
+  --text-link: #006ce7;
+
+  --border-color: #d1d4d8;
+  --border-subtle: rgba(0, 0, 0, 0.08);
+
+  --brand-color: #5865f2;
+  --brand-hover: #4752c4;
+  --brand-active: #3c45a5;
+
+  --danger-color: #da373c;
+  --danger-hover: #a12828;
+  --danger-bg: rgba(218, 55, 60, 0.12);
+
+  --success-color: #23a55a;
+  --speaking-color: #23a55a;
+  --speaking-glow: rgba(35, 165, 90, 0.4);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.08);
+  --shadow-md: 0 4px 8px rgba(0, 0, 0, 0.12);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.16);
+
+  --scrollbar-thumb: #c4c9d4;
+  --scrollbar-track: #f2f3f5;
+}

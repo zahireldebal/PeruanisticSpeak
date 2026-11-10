@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="es" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -8,7 +8,7 @@
 </head>
 <body>
 
-  <!-- Window Titlebar -->
+  <!-- Window Titlebar (Frameless controls) -->
   <header class="titlebar">
     <div class="titlebar-title">
       <img src="public/logo.png" class="titlebar-logo" alt="Logo">
@@ -31,21 +31,52 @@
     </div>
   </header>
 
-  <!-- App Main Layout -->
+  <!-- App Main Layout (Discord 3-Column Style) -->
   <div class="app-container">
 
-    <!-- Left Sidebar (240px) -->
+    <!-- Column 1: Server Rail (68px) -->
+    <nav class="server-rail">
+      <div class="server-icon-wrap active" id="btnServerPill" title="PeruanisticSPEAK Gamer Server">
+        <div class="server-icon-pill"></div>
+        <div class="server-icon">
+          <img src="public/logo.png" alt="PeruanisticSPEAK">
+        </div>
+      </div>
+
+      <div class="rail-separator"></div>
+
+      <!-- Theme Switcher (Dark / Light) -->
+      <button class="theme-toggle-btn" id="btnToggleTheme" title="Alternar Tema Claro / Oscuro">
+        <svg id="iconThemeSun" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;">
+          <circle cx="12" cy="12" r="5"></circle>
+          <line x1="12" y1="1" x2="12" y2="3"></line>
+          <line x1="12" y1="21" x2="12" y2="23"></line>
+          <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+          <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+          <line x1="1" y1="12" x2="3" y2="12"></line>
+          <line x1="21" y1="12" x2="23" y2="12"></line>
+          <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+          <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+        </svg>
+        <svg id="iconThemeMoon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+        </svg>
+      </button>
+    </nav>
+
+    <!-- Column 2: Channels Sidebar (240px) -->
     <aside class="sidebar">
       <div>
-        <div class="sidebar-header">
-          <div class="server-title" id="btnServerConnectHeader" style="cursor:pointer;" title="Clic para cambiar servidor">
+        <!-- Server Header -->
+        <div class="sidebar-header" id="btnServerConnectHeader" title="Clic para cambiar servidor">
+          <div style="display:flex; align-items:center; gap:4px; overflow:hidden;">
             <span class="server-status-dot" id="serverStatusDot"></span>
-            <span id="serverTitleText">Servidor Online</span>
+            <span id="serverTitleText" style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">PeruanisticSPEAK</span>
           </div>
           <div style="display:flex; align-items:center; gap:4px;">
-            <button class="btn btn-secondary btn-sm" id="btnChangeServerPill" title="Cambiar Servidor o Nombre" style="font-size:10px; padding:2px 6px;">Servidor</button>
+            <button class="btn btn-secondary btn-sm" id="btnChangeServerPill" title="Cambiar Servidor" style="font-size:10px; padding:2px 6px;">Servidor</button>
             <button class="btn btn-secondary btn-sm" id="btnOpenSettingsTop" title="Ajustes">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <circle cx="12" cy="12" r="3"></circle>
                 <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
               </svg>
@@ -62,25 +93,22 @@
               <span class="channel-badge" id="voiceUserCountBadge">0</span>
             </div>
 
-            <!-- Voice Channel 1 -->
+            <!-- Voice 1 -->
             <div class="channel-item active" data-channel-id="voz-1" id="channelVoz1">
               <div class="channel-item-left">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
                   <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
                 </svg>
                 <span>voz-1</span>
               </div>
             </div>
-            <!-- Sub-list of participants in voz-1 -->
-            <div class="channel-participants" id="participantsVoz1">
-              <!-- Dynamically populated -->
-            </div>
+            <div class="channel-participants" id="participantsVoz1"></div>
 
-            <!-- Voice Channel 2 -->
+            <!-- Voice 2 -->
             <div class="channel-item" data-channel-id="voz-2" id="channelVoz2">
               <div class="channel-item-left">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
                   <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
                 </svg>
@@ -89,10 +117,10 @@
             </div>
             <div class="channel-participants" id="participantsVoz2"></div>
 
-            <!-- Voice Channel 3 (AFK) -->
+            <!-- AFK Room -->
             <div class="channel-item" data-channel-id="sala-afk" id="channelVozAfk">
               <div class="channel-item-left">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
                 </svg>
                 <span>sala-afk</span>
@@ -101,24 +129,43 @@
             <div class="channel-participants" id="participantsVozAfk"></div>
           </div>
 
-          <!-- Text Channels Category -->
+          <!-- Text Channels Category (Per-channel chat) -->
           <div class="channel-category">
             <div class="category-header">
               <span>Canales de Texto</span>
             </div>
-            <div class="channel-item active" id="textChannelGeneral">
+            <div class="channel-item active" data-text-channel="general" id="textChannelGeneral">
               <div class="channel-item-left">
-                <span style="font-weight:700; color:var(--color-text-muted);">#</span>
-                <span>chat</span>
+                <span style="font-weight:700; color:var(--text-muted);">#</span>
+                <span>general</span>
+              </div>
+            </div>
+            <div class="channel-item" data-text-channel="voz-1" id="textChannelVoz1">
+              <div class="channel-item-left">
+                <span style="font-weight:700; color:var(--text-muted);">#</span>
+                <span>voz-1</span>
+              </div>
+            </div>
+            <div class="channel-item" data-text-channel="voz-2" id="textChannelVoz2">
+              <div class="channel-item-left">
+                <span style="font-weight:700; color:var(--text-muted);">#</span>
+                <span>voz-2</span>
+              </div>
+            </div>
+            <div class="channel-item" data-text-channel="sala-afk" id="textChannelVozAfk">
+              <div class="channel-item-left">
+                <span style="font-weight:700; color:var(--text-muted);">#</span>
+                <span>sala-afk</span>
               </div>
             </div>
           </div>
         </div>
       </div>
 
-      <!-- Bottom User Deck (64px) -->
+      <!-- Bottom User Deck -->
       <div class="user-panel">
-        <div class="user-info" id="btnUserProfile" title="Editar Nombre">
+        <input type="file" id="avatarFileInput" accept="image/*" style="display:none;">
+        <div class="user-info" id="btnUserProfile" title="Clic para cambiar foto de perfil">
           <div class="user-avatar-wrap">
             <div class="user-avatar" id="localAvatar">G</div>
             <div class="user-status-indicator" id="localStatusIndicator"></div>
@@ -130,34 +177,27 @@
         </div>
 
         <div class="deck-actions">
-          <!-- Mute Mic -->
-          <button class="deck-btn" id="btnToggleMute" title="Silenciar Micrófono (Atajo configurable)">
+          <button class="deck-btn" id="btnToggleMute" title="Silenciar Micrófono">
             <svg id="iconMic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
               <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
               <line x1="12" y1="19" x2="12" y2="22"></line>
             </svg>
           </button>
-
-          <!-- Deafen Sound -->
-          <button class="deck-btn" id="btnToggleDeafen" title="Ensordecer Sonido (Atajo configurable)">
+          <button class="deck-btn" id="btnToggleDeafen" title="Ensordecer Sonido">
             <svg id="iconHeadphones" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M3 18v-6a9 9 0 0 1 18 0v6"></path>
               <path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"></path>
             </svg>
           </button>
-
-          <!-- Screen Share -->
-          <button class="deck-btn" id="btnToggleScreen" title="Transmitir Pantalla (720p/1080p @ 30fps)">
+          <button class="deck-btn" id="btnToggleScreen" title="Transmitir Pantalla">
             <svg id="iconScreen" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
               <line x1="8" y1="21" x2="16" y2="21"></line>
               <line x1="12" y1="17" x2="12" y2="21"></line>
             </svg>
           </button>
-
-          <!-- Settings -->
-          <button class="deck-btn" id="btnOpenSettings" title="Ajustes de Sonido y Atajos">
+          <button class="deck-btn" id="btnOpenSettings" title="Ajustes">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="12" cy="12" r="3"></circle>
               <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
@@ -167,13 +207,13 @@
       </div>
     </aside>
 
-    <!-- Main View Stage -->
+    <!-- Column 3: Main View (Center) -->
     <main class="main-view">
       <!-- Topbar Header -->
       <div class="channel-topbar">
         <div class="channel-topbar-left">
           <div class="channel-topbar-title">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
               <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
             </svg>
@@ -194,7 +234,7 @@
             </svg>
             <span id="quickShareText">Compartir Pantalla</span>
           </button>
-          <button class="btn btn-danger btn-sm" id="btnDisconnectVoice" title="Desconectar de la sala de voz">
+          <button class="btn btn-danger btn-sm" id="btnDisconnectVoice" title="Desconectar de la llamada">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.34a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91"></path>
               <line x1="23" y1="1" x2="1" y2="23"></line>
@@ -208,7 +248,6 @@
       <div class="stage-container">
         <!-- Screen Share Viewport -->
         <div class="screen-stage" id="screenStage">
-          <!-- Active Video Element -->
           <video id="screenVideoElement" class="screen-video" autoplay playsinline style="display:none;"></video>
 
           <!-- Top Overlay Information -->
@@ -216,6 +255,14 @@
             <div class="screen-badge">
               <span class="screen-quality-pill" id="screenQualityBadge">720p 30fps</span>
               <span id="screenBroadcasterName">Transmitiendo</span>
+            </div>
+            <!-- Viewer Eye Indicator (Feature 8) -->
+            <div class="screen-viewer-badge" id="screenViewerBadge" title="Espectadores viendo tu pantalla">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                <circle cx="12" cy="12" r="3"></circle>
+              </svg>
+              <span id="screenViewerCount">0</span>
             </div>
           </div>
 
@@ -225,54 +272,145 @@
             <button class="btn btn-danger btn-sm" id="btnStopScreenShareOverlay" style="display:none;">Detener Transmisión</button>
           </div>
 
-          <!-- Empty State (No screen shared) -->
+          <!-- Empty State -->
           <div class="empty-screen-state" id="emptyScreenState">
-            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
               <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
               <line x1="8" y1="21" x2="16" y2="21"></line>
               <line x1="12" y1="17" x2="12" y2="21"></line>
             </svg>
             <div class="empty-screen-title">Nadie está transmitiendo pantalla</div>
-            <div class="empty-screen-desc">Comparte tus partidas en tiempo real en 720p o 1080p a 30 fps con latencia ultra-baja y $0 costo.</div>
+            <div class="empty-screen-desc">Comparte tus partidas en tiempo real en 720p o 1080p con audio de juego y cero costo.</div>
             <button class="btn btn-primary" id="btnStartScreenFromEmpty">Transmitir Mi Pantalla</button>
           </div>
         </div>
 
-        <!-- Participants Voice Cards Grid -->
-        <div class="participants-grid" id="participantsGrid">
-          <!-- Populated dynamically -->
-        </div>
+        <!-- Participants Cards Grid -->
+        <div class="participants-grid" id="participantsGrid"></div>
       </div>
 
-      <!-- Bottom Chat Drawer -->
-      <div class="chat-drawer">
+      <!-- Resizable Chat Drawer (Bug 10 & Feature 6 & 9) -->
+      <div class="chat-drawer" id="chatDrawer">
+        <!-- Vertical Resize Drag Handle -->
+        <div class="chat-resize-handle" id="chatResizeHandle" title="Arrastra para cambiar tamaño del chat"></div>
+
         <div class="chat-messages" id="chatMessages">
           <div class="chat-message-row">
-            <span class="chat-author">Sistema</span>
-            <span class="chat-time">ahora</span>
-            <span class="chat-body">Bienvenido a PeruanisticSPEAK. Conexión de voz, pantalla y chat con imágenes activa.</span>
+            <div class="chat-avatar-thumb">S</div>
+            <div class="chat-content-wrap">
+              <div class="chat-author-line">
+                <span class="chat-author">Sistema</span>
+                <span class="chat-time">ahora</span>
+              </div>
+              <span class="chat-body">Bienvenido a PeruanisticSPEAK. Conexión de voz, pantalla, chat y emojis activa.</span>
+            </div>
           </div>
         </div>
+
         <!-- Image Preview Bar -->
         <div class="chat-image-preview-bar" id="chatImagePreviewBar" style="display:none;">
           <img id="chatPreviewThumb" class="chat-preview-thumb" src="" alt="Vista previa">
           <span class="chat-preview-text" id="chatPreviewFileName">Imagen adjunta</span>
           <button type="button" class="btn btn-secondary btn-sm" id="btnCancelImage">✕ Quitar</button>
         </div>
+
+        <!-- Emoji Picker Popup -->
+        <div class="emoji-picker-popup" id="emojiPickerPopup">
+          <div class="emoji-grid" id="emojiGrid">
+            <!-- Populated dynamically with emojis -->
+          </div>
+        </div>
+
+        <!-- Chat Input Form -->
         <form class="chat-input-row" id="chatForm">
           <input type="file" id="fileImageInput" accept="image/*" style="display:none;">
-          <button type="button" class="chat-attach-btn" id="btnAttachImage" title="Adjuntar imagen (o pegar con Ctrl+V)">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <rect width="18" height="18" x="3" y="3" rx="2" ry="2"/>
-              <circle cx="9" cy="9" r="2"/>
-              <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>
-            </svg>
-          </button>
-          <input type="text" class="chat-input" id="chatInput" placeholder="Enviar mensaje o pega una imagen con Ctrl+V..." autocomplete="off">
+          <div class="chat-input-box">
+            <button type="button" class="chat-action-btn" id="btnAttachImage" title="Adjuntar imagen (o pega con Ctrl+V)">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="12" y1="8" x2="12" y2="16"></line>
+                <line x1="8" y1="12" x2="16" y2="12"></line>
+              </svg>
+            </button>
+            <input type="text" class="chat-input" id="chatInput" placeholder="Enviar mensaje a #general..." autocomplete="off">
+            <button type="button" class="chat-action-btn" id="btnOpenEmojiPicker" title="Insertar emoji">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"></circle>
+                <path d="M8 14s1.5 2 4 2 4-2 4-2"></path>
+                <line x1="9" y1="9" x2="9.01" y2="9"></line>
+                <line x1="15" y1="9" x2="15.01" y2="9"></line>
+              </svg>
+            </button>
+          </div>
           <button type="submit" class="btn btn-primary btn-sm">Enviar</button>
         </form>
       </div>
     </main>
+
+    <!-- Column 4: Right Members Sidebar (220px) -->
+    <aside class="members-sidebar">
+      <div class="members-category-title" id="membersCountTitle">EN LÍNEA — 1</div>
+      <div id="membersList">
+        <!-- Populated dynamically with all active server members -->
+      </div>
+    </aside>
+
+  </div>
+
+  <!-- Screen Share Quality & Audio Config Modal (Bug 1 & 2) -->
+  <div class="modal-overlay hidden" id="screenQualityModal">
+    <div class="modal-card" style="max-width: 460px;">
+      <div class="modal-header">
+        <h2 class="modal-title">Configuración de Transmisión</h2>
+        <button class="btn btn-secondary btn-sm" id="btnCloseScreenQualityModal">✕</button>
+      </div>
+      <div class="modal-body">
+        <span class="setting-desc">Elige la calidad de video y si deseas transmitir el audio del juego:</span>
+
+        <div class="preset-options-grid">
+          <div class="preset-card-option selected" id="optPreset720p" data-preset="720p">
+            <div class="preset-card-title">720p @ 30 FPS</div>
+            <div class="preset-card-sub">Menor ping y uso de datos. Ideal para shooters y juegos rápidos.</div>
+          </div>
+          <div class="preset-card-option" id="optPreset1080p" data-preset="1080p">
+            <div class="preset-card-title">1080p @ 30 FPS</div>
+            <div class="preset-card-sub">Alta definición nítida. Mayor claridad para texto y detalles.</div>
+          </div>
+        </div>
+
+        <div class="toggle-switch-row" style="margin-top: 8px;">
+          <div class="toggle-switch-meta">
+            <div class="setting-label">Compartir Audio de la Pantalla / Juego</div>
+            <div class="setting-desc">Tus amigos escucharán el juego, videos o música de tu PC.</div>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" id="checkCaptureScreenAudio" checked>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="btnCancelScreenQuality">Cancelar</button>
+        <button class="btn btn-primary" id="btnConfirmScreenQuality">Continuar y Elegir Pantalla</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Screen & Game Window Picker Modal -->
+  <div class="modal-overlay hidden" id="screenPickerModal">
+    <div class="modal-card" style="max-width: 600px;">
+      <div class="modal-header">
+        <h2 class="modal-title">Transmitir Pantalla o Ventana</h2>
+        <button class="btn btn-secondary btn-sm" id="btnCloseScreenPicker">✕</button>
+      </div>
+      <div class="modal-body">
+        <span class="setting-desc">Selecciona la pantalla completa o la ventana que deseas compartir:</span>
+        <div class="screen-picker-grid" id="screenPickerGrid"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="btnCancelScreenPicker">Cancelar</button>
+      </div>
+    </div>
   </div>
 
   <!-- Settings Modal (Stitch modal-standard) -->
@@ -287,7 +425,7 @@
       <div class="modal-tabs">
         <div class="modal-tab active" data-tab="tab-audio">Audio y Video</div>
         <div class="modal-tab" data-tab="tab-shortcuts">Atajos de Teclado</div>
-        <div class="modal-tab" data-tab="tab-server">Servidor y Red</div>
+        <div class="modal-tab" data-tab="tab-server">Servidor y Perfil</div>
       </div>
 
       <div class="modal-body">
@@ -314,11 +452,48 @@
               <option value="vad">Detección de Actividad de Voz (VAD)</option>
               <option value="ptt">Pulsar para Hablar (Push-to-Talk)</option>
             </select>
-            <span class="setting-desc">En modo VAD, el micro se activa automáticamente al hablar.</span>
           </div>
 
-          <div class="setting-group">
-            <label class="setting-label">Calidad de Transmisión de Pantalla</label>
+          <!-- Feature 1: Advanced Discord-style Audio Processing -->
+          <div style="border-top:1px solid var(--border-subtle); padding-top:10px; margin-top:4px;">
+            <div class="setting-label" style="margin-bottom:8px;">Mejoras de Audio (Estilo Discord)</div>
+
+            <div class="toggle-switch-row">
+              <div class="toggle-switch-meta">
+                <span class="setting-label">Supresión de Ruido</span>
+                <span class="setting-desc">Filtra ruidos de fondo como teclados mecánicos o ventiladores.</span>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="toggleNoiseSuppression" checked>
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div class="toggle-switch-row">
+              <div class="toggle-switch-meta">
+                <span class="setting-label">Cancelación de Eco</span>
+                <span class="setting-desc">Evita que el sonido de tus altavoces regrese al micrófono.</span>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="toggleEchoCancellation" checked>
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div class="toggle-switch-row">
+              <div class="toggle-switch-meta">
+                <span class="setting-label">Control Automático de Ganancia</span>
+                <span class="setting-desc">Normaliza tu volumen para que no se escuche muy bajo o distorsionado.</span>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="toggleAutoGain" checked>
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+          </div>
+
+          <div class="setting-group" style="margin-top:8px;">
+            <label class="setting-label">Calidad Predeterminada de Pantalla</label>
             <select class="select-input" id="selectScreenPreset">
               <option value="720p">720p @ 30 FPS (Recomendado para juegos / menor ping)</option>
               <option value="1080p">1080p @ 30 FPS (Alta definición / mayor nitidez)</option>
@@ -328,7 +503,7 @@
 
         <!-- Tab 2: Customizable Shortcuts -->
         <div class="tab-pane hidden" id="tab-shortcuts">
-          <span class="setting-desc">Haz clic sobre cualquier atajo y presiona la tecla o combinación deseada para jugar sin interrupciones.</span>
+          <span class="setting-desc">Haz clic sobre cualquier atajo y presiona la tecla o combinación deseada:</span>
 
           <div class="shortcut-row">
             <div>
@@ -349,7 +524,7 @@
           <div class="shortcut-row">
             <div>
               <div class="setting-label">Iniciar / Detener Pantalla</div>
-              <div class="setting-desc">Transmite o detén tu juego al instante.</div>
+              <div class="setting-desc">Transmite o detén tu pantalla al instante.</div>
             </div>
             <button class="shortcut-key-btn" data-action="toggleScreen" id="btnKeyScreen">Ctrl+Shift+S</button>
           </div>
@@ -363,8 +538,17 @@
           </div>
         </div>
 
-        <!-- Tab 3: Server & Network -->
+        <!-- Tab 3: Server & Profile (Feature 2) -->
         <div class="tab-pane hidden" id="tab-server">
+          <div class="setting-group">
+            <label class="setting-label">Foto de Perfil (Avatar)</label>
+            <div style="display:flex; align-items:center; gap:12px; margin-top:4px;">
+              <div class="user-avatar" id="settingsAvatarPreview" style="width:48px; height:48px; font-size:18px;">G</div>
+              <button type="button" class="btn btn-secondary btn-sm" id="btnUploadAvatarSettings">Cambiar Imagen</button>
+              <button type="button" class="btn btn-secondary btn-sm" id="btnRemoveAvatarSettings">Quitar</button>
+            </div>
+          </div>
+
           <div class="setting-group">
             <label class="setting-label">Nombre de Usuario (Gamer Tag)</label>
             <input type="text" class="text-input" id="inputUsername" placeholder="Ej. ElPeruchoPro">
@@ -372,8 +556,8 @@
 
           <div class="setting-group">
             <label class="setting-label">Dirección del Servidor de Señalización</label>
-            <input type="text" class="text-input" id="inputServerUrl" value="ws://localhost:3001" placeholder="ws://ip-del-amigo:3001">
-            <span class="setting-desc">Para jugar con amigos fuera de tu red local, ingresa la IP pública o tunnel gratuito (ej. ngrok/cloudflare).</span>
+            <input type="text" class="text-input" id="inputServerUrl" value="wss://peruanisticspeak.onrender.com" placeholder="wss://tu-servidor.onrender.com">
+            <span class="setting-desc">Servidor de señalización público o local.</span>
           </div>
 
           <button class="btn btn-secondary btn-sm" id="btnReconnectServer">Reconectar Servidor</button>
@@ -386,26 +570,7 @@
     </div>
   </div>
 
-  <!-- Screen & Game Window Picker Modal -->
-  <div class="modal-overlay hidden" id="screenPickerModal">
-    <div class="modal-card">
-      <div class="modal-header">
-        <h2 class="modal-title">Transmitir Pantalla o Juego</h2>
-        <button class="btn btn-secondary btn-sm" id="btnCloseScreenPicker">✕</button>
-      </div>
-      <div class="modal-body">
-        <span class="setting-desc">Selecciona la pantalla completa o la ventana del juego que deseas compartir con tus amigos (720p/1080p @ 30 FPS):</span>
-        <div class="screen-picker-grid" id="screenPickerGrid">
-          <!-- Populated dynamically with screens and windows -->
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-secondary" id="btnCancelScreenPicker">Cancelar</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Quick Server Connect Modal (First-run / Change Server) -->
+  <!-- Quick Server Connect Modal (First-run / Change Server / Nickname collision) -->
   <div class="modal-overlay hidden" id="connectServerModal">
     <div class="modal-card" style="max-width: 480px;">
       <div class="modal-header">
@@ -419,11 +584,12 @@
         <div class="setting-group">
           <label class="setting-label">Tu Nombre de Jugador</label>
           <input type="text" class="text-input" id="quickInputUsername" placeholder="Ej. ElPeruchoPro">
+          <span id="quickConnectError" style="color:var(--danger-color); font-size:12px; font-weight:600; display:none;"></span>
         </div>
         <div class="setting-group">
           <label class="setting-label">URL del Servidor</label>
-          <input type="text" class="text-input" id="quickInputServerUrl" placeholder="ws://localhost:3001 o wss://tu-servidor...">
-          <span class="setting-desc">Pega aquí la dirección IP o túnel público (Cloudflare / Radmin / ngrok) de tu servidor o el de tu amigo.</span>
+          <input type="text" class="text-input" id="quickInputServerUrl" placeholder="wss://peruanisticspeak.onrender.com">
+          <span class="setting-desc">Pega la dirección de tu servidor en Render o tu red local.</span>
         </div>
       </div>
       <div class="modal-footer">
@@ -441,4 +607,3 @@
   <script src="src/app.js"></script>
 </body>
 </html>
-

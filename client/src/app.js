@@ -1,22 +1,31 @@
 /**
  * PeruanisticSPEAK - Main Application Controller
- * Handles UI interactions, state management, reactive indicators and WebRTC orchestration.
+ * Handles UI interactions, state management, Discord-inspired 3-column layout,
+ * WebRTC orchestration, chat persistence, emoji picker, theme toggling, and sound cues.
  */
 
 document.addEventListener('DOMContentLoaded', async () => {
-  console.log('[App] Initializing PeruanisticSPEAK...');
+  console.log('[App] Initializing PeruanisticSPEAK v1.0...');
 
   const DEFAULT_SERVER_URL = 'wss://peruanisticspeak.onrender.com';
 
-  // State
+  // -------------------------------------------------------------
+  // Persistent State
+  // -------------------------------------------------------------
   const state = {
     peerId: localStorage.getItem('ps_peer_id') || 'peer_' + Math.random().toString(36).substring(2, 9),
     username: localStorage.getItem('ps_username') || 'Gamer_' + Math.floor(100 + Math.random() * 900),
+    avatar: localStorage.getItem('ps_avatar') || null,
     serverUrl: localStorage.getItem('ps_server_url') || DEFAULT_SERVER_URL,
+    theme: localStorage.getItem('ps_theme') || 'dark',
     currentRoom: 'voz-1',
+    activeTextChannel: 'general',
     isConnectedToVoice: true,
     activeScreenOwner: null,
     attachedImage: null,
+    screenPreset: '720p',
+    captureScreenAudio: true,
+    serverRoomsState: {},
     shortcuts: JSON.parse(localStorage.getItem('ps_shortcuts') || JSON.stringify({
       toggleMute: 'Ctrl+Shift+M',
       toggleDeafen: 'Ctrl+Shift+D',
@@ -29,34 +38,49 @@ document.addEventListener('DOMContentLoaded', async () => {
   localStorage.setItem('ps_peer_id', state.peerId);
   localStorage.setItem('ps_username', state.username);
 
-  // DOM Elements
+  // Apply Theme
+  applyTheme(state.theme);
+
+  // -------------------------------------------------------------
+  // DOM References
+  // -------------------------------------------------------------
   const el = {
     // Window controls
     btnMinimize: document.getElementById('btnMinimize'),
     btnMaximize: document.getElementById('btnMaximize'),
     btnClose: document.getElementById('btnClose'),
+
+    // Server Rail & Theme
+    btnToggleTheme: document.getElementById('btnToggleTheme'),
+    iconThemeSun: document.getElementById('iconThemeSun'),
+    iconThemeMoon: document.getElementById('iconThemeMoon'),
+
     // Sidebar & Status
     serverStatusDot: document.getElementById('serverStatusDot'),
     serverTitleText: document.getElementById('serverTitleText'),
     btnServerConnectHeader: document.getElementById('btnServerConnectHeader'),
     btnChangeServerPill: document.getElementById('btnChangeServerPill'),
     voiceUserCountBadge: document.getElementById('voiceUserCountBadge'),
-    channelItems: document.querySelectorAll('.channel-item'),
+    channelItems: document.querySelectorAll('.channel-item[data-channel-id]'),
+    textChannelItems: document.querySelectorAll('.channel-item[data-text-channel]'),
     participantsVoz1: document.getElementById('participantsVoz1'),
     participantsVoz2: document.getElementById('participantsVoz2'),
     participantsVozAfk: document.getElementById('participantsVozAfk'),
+
     // User deck
+    btnUserProfile: document.getElementById('btnUserProfile'),
+    avatarFileInput: document.getElementById('avatarFileInput'),
     localAvatar: document.getElementById('localAvatar'),
     localStatusIndicator: document.getElementById('localStatusIndicator'),
     localUsernameDisplay: document.getElementById('localUsernameDisplay'),
     localModeDisplay: document.getElementById('localModeDisplay'),
-    btnUserProfile: document.getElementById('btnUserProfile'),
     btnToggleMute: document.getElementById('btnToggleMute'),
     btnToggleDeafen: document.getElementById('btnToggleDeafen'),
     btnToggleScreen: document.getElementById('btnToggleScreen'),
     btnOpenSettings: document.getElementById('btnOpenSettings'),
     btnOpenSettingsTop: document.getElementById('btnOpenSettingsTop'),
-    // Stage & Topbar
+
+    // Main Stage & Topbar
     currentChannelHeader: document.getElementById('currentChannelHeader'),
     rtcStatusPill: document.getElementById('rtcStatusPill'),
     rtcStatusText: document.getElementById('rtcStatusText'),
@@ -68,13 +92,22 @@ document.addEventListener('DOMContentLoaded', async () => {
     screenOverlayTop: document.getElementById('screenOverlayTop'),
     screenQualityBadge: document.getElementById('screenQualityBadge'),
     screenBroadcasterName: document.getElementById('screenBroadcasterName'),
+    screenViewerBadge: document.getElementById('screenViewerBadge'),
+    screenViewerCount: document.getElementById('screenViewerCount'),
     screenOverlayActions: document.getElementById('screenOverlayActions'),
     btnToggleFullscreen: document.getElementById('btnToggleFullscreen'),
     btnStopScreenShareOverlay: document.getElementById('btnStopScreenShareOverlay'),
     emptyScreenState: document.getElementById('emptyScreenState'),
     btnStartScreenFromEmpty: document.getElementById('btnStartScreenFromEmpty'),
     participantsGrid: document.getElementById('participantsGrid'),
-    // Chat & Image Attachment
+
+    // Right Members List
+    membersCountTitle: document.getElementById('membersCountTitle'),
+    membersList: document.getElementById('membersList'),
+
+    // Chat Drawer & Emojis
+    chatDrawer: document.getElementById('chatDrawer'),
+    chatResizeHandle: document.getElementById('chatResizeHandle'),
     chatMessages: document.getElementById('chatMessages'),
     chatForm: document.getElementById('chatForm'),
     chatInput: document.getElementById('chatInput'),
@@ -84,6 +117,25 @@ document.addEventListener('DOMContentLoaded', async () => {
     chatPreviewThumb: document.getElementById('chatPreviewThumb'),
     chatPreviewFileName: document.getElementById('chatPreviewFileName'),
     btnCancelImage: document.getElementById('btnCancelImage'),
+    btnOpenEmojiPicker: document.getElementById('btnOpenEmojiPicker'),
+    emojiPickerPopup: document.getElementById('emojiPickerPopup'),
+    emojiGrid: document.getElementById('emojiGrid'),
+
+    // Screen Share Quality Modal
+    screenQualityModal: document.getElementById('screenQualityModal'),
+    btnCloseScreenQualityModal: document.getElementById('btnCloseScreenQualityModal'),
+    optPreset720p: document.getElementById('optPreset720p'),
+    optPreset1080p: document.getElementById('optPreset1080p'),
+    checkCaptureScreenAudio: document.getElementById('checkCaptureScreenAudio'),
+    btnCancelScreenQuality: document.getElementById('btnCancelScreenQuality'),
+    btnConfirmScreenQuality: document.getElementById('btnConfirmScreenQuality'),
+
+    // Screen Picker Modal (Electron desktopCapturer)
+    screenPickerModal: document.getElementById('screenPickerModal'),
+    screenPickerGrid: document.getElementById('screenPickerGrid'),
+    btnCloseScreenPicker: document.getElementById('btnCloseScreenPicker'),
+    btnCancelScreenPicker: document.getElementById('btnCancelScreenPicker'),
+
     // Settings Modal
     settingsModal: document.getElementById('settingsModal'),
     btnCloseSettings: document.getElementById('btnCloseSettings'),
@@ -94,6 +146,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     micVolumeBar: document.getElementById('micVolumeBar'),
     selectInputMode: document.getElementById('selectInputMode'),
     selectScreenPreset: document.getElementById('selectScreenPreset'),
+    toggleNoiseSuppression: document.getElementById('toggleNoiseSuppression'),
+    toggleEchoCancellation: document.getElementById('toggleEchoCancellation'),
+    toggleAutoGain: document.getElementById('toggleAutoGain'),
+    settingsAvatarPreview: document.getElementById('settingsAvatarPreview'),
+    btnUploadAvatarSettings: document.getElementById('btnUploadAvatarSettings'),
+    btnRemoveAvatarSettings: document.getElementById('btnRemoveAvatarSettings'),
     inputUsername: document.getElementById('inputUsername'),
     inputServerUrl: document.getElementById('inputServerUrl'),
     btnReconnectServer: document.getElementById('btnReconnectServer'),
@@ -101,50 +159,47 @@ document.addEventListener('DOMContentLoaded', async () => {
     btnKeyDeafen: document.getElementById('btnKeyDeafen'),
     btnKeyScreen: document.getElementById('btnKeyScreen'),
     btnKeyPtt: document.getElementById('btnKeyPtt'),
-    // Screen Picker Modal
-    screenPickerModal: document.getElementById('screenPickerModal'),
-    screenPickerGrid: document.getElementById('screenPickerGrid'),
-    btnCloseScreenPicker: document.getElementById('btnCloseScreenPicker'),
-    btnCancelScreenPicker: document.getElementById('btnCancelScreenPicker'),
+
     // Quick Connect Modal
     connectServerModal: document.getElementById('connectServerModal'),
     quickInputUsername: document.getElementById('quickInputUsername'),
     quickInputServerUrl: document.getElementById('quickInputServerUrl'),
+    quickConnectError: document.getElementById('quickConnectError'),
     btnCloseConnectModal: document.getElementById('btnCloseConnectModal'),
     btnQuickConnectSubmit: document.getElementById('btnQuickConnectSubmit')
   };
 
-  // Update UI user profile
-  el.localUsernameDisplay.textContent = state.username;
-  el.localAvatar.textContent = state.username.charAt(0).toUpperCase();
+  // Update UI user profile on start
+  updateLocalProfileUI();
   el.inputUsername.value = state.username;
   el.inputServerUrl.value = state.serverUrl;
   updateShortcutButtonsUI();
+  populateEmojiGrid();
+  loadChannelChatHistory(state.activeTextChannel);
 
-  // Instantiate Core Engines
+  // -------------------------------------------------------------
+  // Instantiate WebRTC & Audio Engines
+  // -------------------------------------------------------------
   const signaling = new SignalingClient(state.serverUrl);
   const audio = new AudioManager();
   const screen = new ScreenShareManager();
   const peers = new PeerManager(signaling, audio, screen);
   const sounds = new SoundEffects();
 
-  signaling.on('user-joined', () => {
-    sounds.playJoin();
-  });
+  // Sync saved audio processing settings with switches
+  el.toggleNoiseSuppression.checked = !!audio.audioProcessing.noiseSuppression;
+  el.toggleEchoCancellation.checked = !!audio.audioProcessing.echoCancellation;
+  el.toggleAutoGain.checked = !!audio.audioProcessing.autoGainControl;
 
-  signaling.on('user-left', () => {
-    sounds.playLeave();
-  });
-
-  // Initialize Microphone
+  // Initialize Microphone (Bug 5: restores saved deviceId automatically)
   try {
     await audio.init();
     populateAudioDevices();
   } catch (err) {
-    console.warn('[App] Could not initialize mic immediately (user may grant on click):', err);
+    console.warn('[App] Microphone init note:', err);
   }
 
-  // Connect Signaling Server (or prompt welcome connect screen if not configured)
+  // Connect to Signaling Server
   function connectSignaling() {
     signaling.connect(state.serverUrl);
   }
@@ -155,12 +210,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     connectSignaling();
   }
 
+  // -------------------------------------------------------------
+  // Signaling Connection Lifecycle
+  // -------------------------------------------------------------
   signaling.on('connected', () => {
     el.serverStatusDot.classList.remove('disconnected');
     if (state.isConnectedToVoice && state.currentRoom) {
       el.rtcStatusPill.classList.remove('disconnected');
       el.rtcStatusText.textContent = 'Voz Conectada';
-      signaling.joinRoom(state.currentRoom, state.peerId, state.username);
+      signaling.joinRoom(state.currentRoom, state.peerId, state.username, state.avatar);
     }
   });
 
@@ -170,11 +228,34 @@ document.addEventListener('DOMContentLoaded', async () => {
     el.rtcStatusText.textContent = 'Reconectando...';
   });
 
-  // UI Reactive Speakers & Voice Meter
-  audio.on('volume', (vol) => {
-    if (el.micVolumeBar) {
-      el.micVolumeBar.style.width = vol + '%';
+  // Unique Nickname rejection handler (Feature 3)
+  signaling.on('server-error', (err) => {
+    if (err.code === 'nick-taken') {
+      openConnectModal(err.message);
     }
+  });
+
+  // Server-wide channels state (Bug 4)
+  signaling.on('server-state', (rooms) => {
+    state.serverRoomsState = rooms || {};
+    renderSidebarChannelsFromState();
+    renderMembersList();
+  });
+
+  // Sound cues on join / leave (Feature 7)
+  signaling.on('user-joined', () => {
+    sounds.playJoin();
+  });
+
+  signaling.on('user-left', () => {
+    sounds.playLeave();
+  });
+
+  // -------------------------------------------------------------
+  // Audio & Voice Activity Events
+  // -------------------------------------------------------------
+  audio.on('volume', (vol) => {
+    if (el.micVolumeBar) el.micVolumeBar.style.width = vol + '%';
   });
 
   audio.on('speaking-change', (isSpeaking) => {
@@ -189,10 +270,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   audio.on('mute-change', (isMuted) => {
     if (isMuted) {
       el.btnToggleMute.classList.add('active-danger');
-      el.localStatusIndicator.style.backgroundColor = 'var(--color-danger)';
+      el.localStatusIndicator.style.backgroundColor = 'var(--danger-color)';
     } else {
       el.btnToggleMute.classList.remove('active-danger');
-      el.localStatusIndicator.style.backgroundColor = 'var(--color-speaking)';
+      el.localStatusIndicator.style.backgroundColor = 'var(--success-color)';
     }
     renderParticipants();
   });
@@ -204,16 +285,20 @@ document.addEventListener('DOMContentLoaded', async () => {
     } else {
       el.btnToggleDeafen.classList.remove('active-danger');
     }
+    renderParticipants();
   });
 
+  // -------------------------------------------------------------
   // Screen Share Events
+  // -------------------------------------------------------------
   screen.on('started', (stream) => {
+    sounds.playScreenShareStart(); // Feature 4: chime on screen share start
     el.btnToggleScreen.classList.add('active-primary');
     el.quickShareText.textContent = 'Detener Transmisión';
     el.btnQuickShareScreen.classList.remove('btn-secondary');
     el.btnQuickShareScreen.classList.add('btn-danger');
 
-    displayScreenStream(stream, 'Tú (' + state.username + ')', screen.currentPreset, true);
+    displayScreenStream(stream, `Tú (${state.username})`, screen.currentPreset, true);
   });
 
   screen.on('stopped', () => {
@@ -227,7 +312,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
-  // Remote Screen added/removed
   peers.on('remote-screen-added', (peerId, stream) => {
     const peer = peers.peerStates.get(peerId);
     const peerName = peer ? peer.username : 'Amigo';
@@ -240,8 +324,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
+  // Feature 8: Screen Viewers
+  peers.on('viewers-changed', (viewersList) => {
+    el.screenViewerCount.textContent = viewersList.length;
+    el.screenViewerBadge.title = viewersList.length > 0
+      ? `Espectadores (${viewersList.length}): ${viewersList.join(', ')}`
+      : 'Nadie está viendo tu pantalla aún';
+  });
+
+  peers.on('viewer-joined', (viewerName) => {
+    sounds.playViewerJoined();
+  });
+
   peers.on('peers-updated', () => {
     renderParticipants();
+    renderMembersList();
   });
 
   function displayScreenStream(stream, title, preset, isLocal, ownerId = null) {
@@ -254,11 +351,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     el.screenOverlayTop.style.display = 'flex';
     el.screenOverlayActions.style.display = 'flex';
     el.screenBroadcasterName.textContent = title;
-    el.screenQualityBadge.textContent = preset + ' 30fps';
+    el.screenQualityBadge.textContent = `${preset} 30fps`;
 
     if (isLocal) {
+      el.screenViewerBadge.style.display = 'flex';
       el.btnStopScreenShareOverlay.style.display = 'inline-flex';
     } else {
+      el.screenViewerBadge.style.display = 'none';
       el.btnStopScreenShareOverlay.style.display = 'none';
     }
   }
@@ -272,9 +371,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     el.emptyScreenState.style.display = 'flex';
   }
 
-  // Render Participants in Voice Channel & Cards Grid (Bug 1 Fix)
+  // -------------------------------------------------------------
+  // Participant & Channel Rendering
+  // -------------------------------------------------------------
   function renderParticipants() {
-    // If not connected to voice, clear everything visually
     if (!state.isConnectedToVoice || !state.currentRoom) {
       el.voiceUserCountBadge.textContent = '0';
       el.participantsVoz1.innerHTML = '';
@@ -285,84 +385,170 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     const activePeers = Array.from(peers.peerStates.values());
-    const totalCount = activePeers.length + 1; // peers + local user
+    const totalCount = activePeers.length + 1;
     el.voiceUserCountBadge.textContent = totalCount;
 
-    // Sub-list in active sidebar channel
-    const currentListContainer = state.currentRoom === 'voz-1'
-      ? el.participantsVoz1
-      : state.currentRoom === 'voz-2'
-        ? el.participantsVoz2
-        : el.participantsVozAfk;
-
-    // Clear others
-    el.participantsVoz1.innerHTML = '';
-    el.participantsVoz2.innerHTML = '';
-    el.participantsVozAfk.innerHTML = '';
-
-    // Add local user in sidebar
-    const localItem = document.createElement('div');
-    localItem.className = 'participant-item';
-    localItem.innerHTML = `
-      <div class="participant-left">
-        <div class="avatar-small ${audio.isSpeaking ? 'speaking' : ''}" id="sidebarAvatarLocal">${state.username.charAt(0).toUpperCase()}</div>
-        <span>${escapeHtml(state.username)} (Tú)</span>
-      </div>
-      <div class="participant-icons">
-        ${screen.isSharing ? '<span class="screen-share-tag">EN VIVO</span>' : ''}
-        ${audio.isMuted ? '<span>🔇</span>' : ''}
-      </div>
-    `;
-    currentListContainer.appendChild(localItem);
-
-    // Add remote peers
-    activePeers.forEach(peer => {
-      const pItem = document.createElement('div');
-      pItem.className = 'participant-item';
-      pItem.innerHTML = `
-        <div class="participant-left">
-          <div class="avatar-small ${peer.isSpeaking ? 'speaking' : ''}">${escapeHtml(peer.username.charAt(0).toUpperCase())}</div>
-          <span>${escapeHtml(peer.username)}</span>
-        </div>
-        <div class="participant-icons">
-          ${peer.isSharingScreen ? '<span class="screen-share-tag">EN VIVO</span>' : ''}
-          ${peer.isMuted ? '<span>🔇</span>' : ''}
-        </div>
-      `;
-      currentListContainer.appendChild(pItem);
-    });
-
-    // Populate Participants Grid (Cards)
+    // Render active voice channel cards grid
     el.participantsGrid.innerHTML = '';
 
     // Local user card
-    const localCard = document.createElement('div');
-    localCard.className = `participant-card ${audio.isSpeaking ? 'speaking' : ''}`;
-    localCard.id = `card-peer-${state.peerId}`;
-    localCard.innerHTML = `
-      <div class="card-avatar ${audio.isSpeaking ? 'speaking' : ''}">${state.username.charAt(0).toUpperCase()}</div>
-      <div class="card-name">${escapeHtml(state.username)} (Tú)</div>
-      <div class="card-badges">
-        ${screen.isSharing ? '<span class="screen-share-tag">TRANSMITIENDO</span>' : ''}
-        ${audio.isMuted ? '<span style="color:var(--color-danger);font-size:11px;">Silenciado</span>' : ''}
-      </div>
-    `;
+    const localCard = createParticipantCard({
+      peerId: state.peerId,
+      username: `${state.username} (Tú)`,
+      avatar: state.avatar,
+      isMuted: audio.isMuted,
+      isDeafened: audio.isDeafened,
+      isSpeaking: audio.isSpeaking,
+      isSharingScreen: screen.isSharing
+    });
     el.participantsGrid.appendChild(localCard);
 
     // Remote peers cards
     activePeers.forEach(peer => {
-      const card = document.createElement('div');
-      card.className = `participant-card ${peer.isSpeaking ? 'speaking' : ''}`;
-      card.id = `card-peer-${peer.peerId}`;
-      card.innerHTML = `
-        <div class="card-avatar ${peer.isSpeaking ? 'speaking' : ''}">${escapeHtml(peer.username.charAt(0).toUpperCase())}</div>
-        <div class="card-name">${escapeHtml(peer.username)}</div>
-        <div class="card-badges">
-          ${peer.isSharingScreen ? '<span class="screen-share-tag">TRANSMITIENDO</span>' : ''}
-          ${peer.isMuted ? '<span style="color:var(--color-danger);font-size:11px;">Silenciado</span>' : ''}
+      const card = createParticipantCard(peer);
+      el.participantsGrid.appendChild(card);
+    });
+
+    renderSidebarChannelsFromState();
+  }
+
+  function createParticipantCard(user) {
+    const card = document.createElement('div');
+    card.className = `participant-card ${user.isSpeaking ? 'speaking' : ''}`;
+    card.id = `card-peer-${user.peerId}`;
+
+    const avatarHtml = user.avatar
+      ? `<div class="card-avatar"><img src="${user.avatar}" alt="${escapeHtml(user.username)}"></div>`
+      : `<div class="card-avatar">${escapeHtml(user.username.charAt(0).toUpperCase())}</div>`;
+
+    let badgesHtml = '';
+    if (user.isSharingScreen) {
+      badgesHtml += `<span class="screen-share-tag">EN VIVO</span>`;
+    }
+    if (user.isMuted) {
+      badgesHtml += `<span title="Silenciado" style="color:var(--danger-color); font-size:12px;">🔇</span>`;
+    }
+    if (user.isDeafened) {
+      badgesHtml += `<span title="Ensordecido" style="color:var(--danger-color); font-size:12px;">🎧</span>`;
+    }
+
+    card.innerHTML = `
+      ${avatarHtml}
+      <div class="card-name">${escapeHtml(user.username)}</div>
+      <div class="card-badges">${badgesHtml}</div>
+    `;
+    return card;
+  }
+
+  function renderSidebarChannelsFromState() {
+    el.participantsVoz1.innerHTML = '';
+    el.participantsVoz2.innerHTML = '';
+    el.participantsVozAfk.innerHTML = '';
+
+    const channelContainers = {
+      'voz-1': el.participantsVoz1,
+      'voz-2': el.participantsVoz2,
+      'sala-afk': el.participantsVozAfk
+    };
+
+    // If connected, add local user to currentRoom
+    if (state.isConnectedToVoice && state.currentRoom && channelContainers[state.currentRoom]) {
+      const localItem = createSidebarParticipantItem({
+        peerId: state.peerId,
+        username: `${state.username} (Tú)`,
+        avatar: state.avatar,
+        isMuted: audio.isMuted,
+        isDeafened: audio.isDeafened,
+        isSpeaking: audio.isSpeaking,
+        isSharingScreen: screen.isSharing
+      });
+      channelContainers[state.currentRoom].appendChild(localItem);
+    }
+
+    // Add peers from serverRoomsState
+    for (const [roomId, users] of Object.entries(state.serverRoomsState)) {
+      const container = channelContainers[roomId];
+      if (!container || !Array.isArray(users)) continue;
+
+      users.forEach(u => {
+        if (u.peerId === state.peerId) return; // already added above
+        const item = createSidebarParticipantItem(u);
+        container.appendChild(item);
+      });
+    }
+  }
+
+  function createSidebarParticipantItem(user) {
+    const item = document.createElement('div');
+    item.className = 'participant-item';
+
+    const avatarHtml = user.avatar
+      ? `<div class="avatar-small ${user.isSpeaking ? 'speaking' : ''}"><img src="${user.avatar}" alt=""></div>`
+      : `<div class="avatar-small ${user.isSpeaking ? 'speaking' : ''}">${escapeHtml(user.username.charAt(0).toUpperCase())}</div>`;
+
+    item.innerHTML = `
+      <div class="participant-left">
+        ${avatarHtml}
+        <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(user.username)}</span>
+      </div>
+      <div class="participant-icons">
+        ${user.isSharingScreen ? '<span class="screen-share-tag">VIVO</span>' : ''}
+        ${user.isMuted ? '<span>🔇</span>' : ''}
+        ${user.isDeafened ? '<span>🎧</span>' : ''}
+      </div>
+    `;
+    return item;
+  }
+
+  function renderMembersList() {
+    el.membersList.innerHTML = '';
+    const allUsers = new Map();
+
+    // Add local user
+    allUsers.set(state.peerId, {
+      peerId: state.peerId,
+      username: `${state.username} (Tú)`,
+      avatar: state.avatar,
+      isSpeaking: audio.isSpeaking,
+      room: state.currentRoom
+    });
+
+    // Add peers from server state
+    for (const [roomId, users] of Object.entries(state.serverRoomsState)) {
+      if (Array.isArray(users)) {
+        users.forEach(u => {
+          if (!allUsers.has(u.peerId)) {
+            allUsers.set(u.peerId, { ...u, room: roomId });
+          }
+        });
+      }
+    }
+
+    // Also include WebRTC peers
+    for (const [peerId, peer] of peers.peerStates.entries()) {
+      if (!allUsers.has(peerId)) {
+        allUsers.set(peerId, { ...peer, room: state.currentRoom });
+      }
+    }
+
+    el.membersCountTitle.textContent = `EN LÍNEA — ${allUsers.size}`;
+
+    allUsers.forEach(u => {
+      const row = document.createElement('div');
+      row.className = 'member-row';
+
+      const avatarHtml = u.avatar
+        ? `<div class="member-avatar ${u.isSpeaking ? 'speaking' : ''}"><img src="${u.avatar}" alt=""></div>`
+        : `<div class="member-avatar ${u.isSpeaking ? 'speaking' : ''}">${escapeHtml(u.username.charAt(0).toUpperCase())}</div>`;
+
+      row.innerHTML = `
+        ${avatarHtml}
+        <div class="member-meta">
+          <span class="member-name">${escapeHtml(u.username)}</span>
+          <span class="member-subtext">${u.room ? `En ${u.room}` : 'Conectado'}</span>
         </div>
       `;
-      el.participantsGrid.appendChild(card);
+      el.membersList.appendChild(row);
     });
   }
 
@@ -377,11 +563,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
-  // Channel Switching & Reconnect
+  // -------------------------------------------------------------
+  // Channel Switching & Teardown (Bug 6 Fix)
+  // -------------------------------------------------------------
   el.channelItems.forEach(item => {
     item.addEventListener('click', () => {
       const chId = item.dataset.channelId;
-      if (!chId) return;
+      if (!chId || chId === state.currentRoom) return;
+
+      console.log(`[App] Switching voice channel from "${state.currentRoom}" to "${chId}"`);
+
+      // Destroy all existing peer connections so users in voz-1 cannot hear voz-2!
+      peers.destroy();
 
       if (!state.isConnectedToVoice) {
         state.isConnectedToVoice = true;
@@ -395,43 +588,98 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       state.currentRoom = chId;
       el.currentChannelHeader.textContent = chId;
-      signaling.joinRoom(state.currentRoom, state.peerId, state.username);
+
+      // Join new room cleanly
+      signaling.joinRoom(state.currentRoom, state.peerId, state.username, state.avatar);
       sounds.playJoin();
       renderParticipants();
     });
   });
 
+  // Text Channel Switching (Feature 9)
+  el.textChannelItems.forEach(item => {
+    item.addEventListener('click', () => {
+      const textCh = item.dataset.textChannel;
+      if (!textCh) return;
+
+      el.textChannelItems.forEach(t => t.classList.remove('active'));
+      item.classList.add('active');
+
+      state.activeTextChannel = textCh;
+      el.chatInput.placeholder = `Enviar mensaje a #${textCh}...`;
+      loadChannelChatHistory(textCh);
+    });
+  });
+
+  // Disconnect from Voice Call
+  el.btnDisconnectVoice.addEventListener('click', () => {
+    sounds.playLeave();
+    signaling.leaveRoom();
+    screen.stop();
+    peers.destroy();
+    state.isConnectedToVoice = false;
+    state.currentRoom = null;
+    el.currentChannelHeader.textContent = 'Ninguno (Desconectado)';
+    el.rtcStatusPill.classList.add('disconnected');
+    el.rtcStatusText.textContent = 'Desconectado';
+    el.channelItems.forEach(c => c.classList.remove('active'));
+    renderParticipants();
+  });
+
   // Action Buttons
   el.btnToggleMute.addEventListener('click', () => audio.toggleMute());
   el.btnToggleDeafen.addEventListener('click', () => audio.toggleDeafen());
-  el.btnToggleScreen.addEventListener('click', () => toggleScreenShare());
-  el.btnQuickShareScreen.addEventListener('click', () => toggleScreenShare());
-  el.btnStartScreenFromEmpty.addEventListener('click', () => toggleScreenShare());
+  el.btnToggleScreen.addEventListener('click', () => handleScreenShareButton());
+  el.btnQuickShareScreen.addEventListener('click', () => handleScreenShareButton());
+  el.btnStartScreenFromEmpty.addEventListener('click', () => handleScreenShareButton());
   el.btnStopScreenShareOverlay.addEventListener('click', () => screen.stop());
 
-  // Screen Share Toggle with Picker Modal (Bug 4 Fix)
-  async function toggleScreenShare() {
+  // -------------------------------------------------------------
+  // Screen Share Quality & Audio Config (Bug 1 & 2)
+  // -------------------------------------------------------------
+  function handleScreenShareButton() {
     if (screen.isSharing) {
-      await screen.stop();
+      screen.stop();
       return;
     }
+    // Open Screen Quality & Audio selector modal
+    el.screenQualityModal.classList.remove('hidden');
+  }
+
+  el.optPreset720p.addEventListener('click', () => {
+    state.screenPreset = '720p';
+    el.optPreset720p.classList.add('selected');
+    el.optPreset1080p.classList.remove('selected');
+  });
+
+  el.optPreset1080p.addEventListener('click', () => {
+    state.screenPreset = '1080p';
+    el.optPreset1080p.classList.add('selected');
+    el.optPreset720p.classList.remove('selected');
+  });
+
+  el.btnCloseScreenQualityModal.addEventListener('click', () => el.screenQualityModal.classList.add('hidden'));
+  el.btnCancelScreenQuality.addEventListener('click', () => el.screenQualityModal.classList.add('hidden'));
+
+  el.btnConfirmScreenQuality.addEventListener('click', () => {
+    el.screenQualityModal.classList.add('hidden');
+    state.captureScreenAudio = el.checkCaptureScreenAudio.checked;
 
     if (window.electronAPI && window.electronAPI.getScreenSources) {
       openScreenPicker();
     } else {
-      const preset = el.selectScreenPreset.value || '720p';
-      screen.start(preset).catch(err => {
-        console.warn('[App] Screen share cancelled or error:', err);
+      screen.start(state.screenPreset, null, state.captureScreenAudio).catch(err => {
+        console.warn('[App] Screen share cancelled:', err);
       });
     }
-  }
+  });
 
   async function openScreenPicker() {
     try {
       const sources = await window.electronAPI.getScreenSources();
       el.screenPickerGrid.innerHTML = '';
       if (!sources || sources.length === 0) {
-        alert('No se detectaron pantallas ni ventanas de juegos disponibles.');
+        alert('No se detectaron pantallas ni ventanas de juegos.');
         return;
       }
       sources.forEach(src => {
@@ -443,9 +691,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         `;
         item.addEventListener('click', async () => {
           el.screenPickerModal.classList.add('hidden');
-          const preset = el.selectScreenPreset.value || '720p';
           try {
-            await screen.start(preset, src.id);
+            await screen.start(state.screenPreset, src.id, state.captureScreenAudio);
           } catch (err) {
             console.error('[App] Failed to start screen share with source:', err);
           }
@@ -469,39 +716,48 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
-  // Disconnect from Voice (Bug 1 Fix)
-  el.btnDisconnectVoice.addEventListener('click', () => {
-    sounds.playLeave();
-    signaling.leaveRoom();
-    screen.stop();
-    peers.destroy();
-    state.isConnectedToVoice = false;
-    state.currentRoom = null;
-    el.currentChannelHeader.textContent = 'Ninguno (Desconectado)';
-    el.rtcStatusPill.classList.add('disconnected');
-    el.rtcStatusText.textContent = 'Desconectado';
-    el.channelItems.forEach(c => c.classList.remove('active'));
-    renderParticipants();
+  // -------------------------------------------------------------
+  // Chat Drawer: Resizable & Persistent (Bug 10 & Feature 9)
+  // -------------------------------------------------------------
+  let isResizingChat = false;
+  let startY = 0;
+  let startHeight = 240;
+
+  el.chatResizeHandle.addEventListener('mousedown', (e) => {
+    isResizingChat = true;
+    startY = e.clientY;
+    startHeight = el.chatDrawer.offsetHeight;
+    el.chatResizeHandle.classList.add('active');
+    document.body.style.cursor = 'ns-resize';
   });
 
-  // -------------------------------------------------------------
-  // Chat & Image Upload / Paste (Feature 2)
-  // -------------------------------------------------------------
-  el.btnAttachImage.addEventListener('click', () => {
-    el.fileImageInput.click();
+  document.addEventListener('mousemove', (e) => {
+    if (!isResizingChat) return;
+    const dy = startY - e.clientY;
+    const newHeight = Math.min(Math.max(startHeight + dy, 120), window.innerHeight * 0.75);
+    el.chatDrawer.style.height = `${newHeight}px`;
   });
 
+  document.addEventListener('mouseup', () => {
+    if (isResizingChat) {
+      isResizingChat = false;
+      el.chatResizeHandle.classList.remove('active');
+      document.body.style.cursor = '';
+    }
+  });
+
+  // Chat Image Attachment
+  el.btnAttachImage.addEventListener('click', () => el.fileImageInput.click());
   el.fileImageInput.addEventListener('change', (e) => {
     const file = e.target.files[0];
-    if (!file) return;
-    processImageFile(file);
+    if (file) processImageFile(file);
   });
 
-  // Paste image from clipboard anywhere (Ctrl+V)
   window.addEventListener('paste', (e) => {
-    const items = (e.clipboardData || e.originalEvent.clipboardData).items;
+    const items = (e.clipboardData || e.originalEvent?.clipboardData)?.items;
+    if (!items) return;
     for (const item of items) {
-      if (item.type.indexOf('image') !== -1) {
+      if (item.type.includes('image')) {
         const file = item.getAsFile();
         if (file) {
           processImageFile(file);
@@ -553,12 +809,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const text = el.chatInput.value.trim();
     if (!text && !state.attachedImage) return;
 
-    signaling.send({
-      type: 'chat-message',
-      roomId: state.currentRoom || 'voz-1',
-      text: text,
-      image: state.attachedImage
-    });
+    signaling.sendChatMessage(text, state.attachedImage, state.activeTextChannel);
 
     el.chatInput.value = '';
     state.attachedImage = null;
@@ -566,17 +817,42 @@ document.addEventListener('DOMContentLoaded', async () => {
     el.chatImagePreviewBar.style.display = 'none';
   });
 
+  // Incoming Chat Message (Feature 5 & 9)
   signaling.on('chat-message', (msg) => {
+    const targetRoom = msg.roomId || 'general';
+
+    // Play notification sound if message is from another user
+    if (msg.senderPeerId !== state.peerId) {
+      sounds.playChatMessage();
+    }
+
+    // Save to channel history
+    saveChatMessageToStorage(targetRoom, msg);
+
+    // If currently viewing this channel, append immediately
+    if (targetRoom === state.activeTextChannel) {
+      appendChatMessageUI(msg);
+    }
+  });
+
+  function appendChatMessageUI(msg) {
     const row = document.createElement('div');
     row.className = 'chat-message-row';
     const dateStr = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    const avatarHtml = msg.avatar
+      ? `<div class="chat-avatar-thumb"><img src="${msg.avatar}" alt=""></div>`
+      : `<div class="chat-avatar-thumb">${escapeHtml(msg.username.charAt(0).toUpperCase())}</div>`;
+
     let imageHtml = '';
     if (msg.image) {
       imageHtml = `<div class="chat-image-wrap"><img src="${msg.image}" class="chat-image" title="Clic para ampliar" onclick="window.open('${msg.image}')"></div>`;
     }
+
     row.innerHTML = `
-      <div style="display:flex; flex-direction:column; gap:2px; width:100%;">
-        <div style="display:flex; align-items:baseline; gap:8px;">
+      ${avatarHtml}
+      <div class="chat-content-wrap">
+        <div class="chat-author-line">
           <span class="chat-author">${escapeHtml(msg.username)}</span>
           <span class="chat-time">${dateStr}</span>
         </div>
@@ -586,22 +862,178 @@ document.addEventListener('DOMContentLoaded', async () => {
     `;
     el.chatMessages.appendChild(row);
     el.chatMessages.scrollTop = el.chatMessages.scrollHeight;
+  }
+
+  function saveChatMessageToStorage(roomId, msg) {
+    try {
+      const key = `ps_chat_${roomId}`;
+      const history = JSON.parse(localStorage.getItem(key) || '[]');
+      history.push(msg);
+      // Keep last 100 messages
+      if (history.length > 100) history.shift();
+      localStorage.setItem(key, JSON.stringify(history));
+    } catch (_) {}
+  }
+
+  function loadChannelChatHistory(roomId) {
+    el.chatMessages.innerHTML = `
+      <div class="chat-message-row">
+        <div class="chat-avatar-thumb">#</div>
+        <div class="chat-content-wrap">
+          <div class="chat-author-line">
+            <span class="chat-author">Canal #${roomId}</span>
+            <span class="chat-time">ahora</span>
+          </div>
+          <span class="chat-body">Este es el inicio de la conversación en #${roomId}.</span>
+        </div>
+      </div>
+    `;
+    try {
+      const key = `ps_chat_${roomId}`;
+      const history = JSON.parse(localStorage.getItem(key) || '[]');
+      history.forEach(msg => appendChatMessageUI(msg));
+    } catch (_) {}
+  }
+
+  // -------------------------------------------------------------
+  // Emoji Picker (Feature 6)
+  // -------------------------------------------------------------
+  const EMOJIS = [
+    '😀', '😂', '🤣', '😎', '🔥', '💀', '🎮',
+    '👑', '👍', '👎', '❤️', '👀', '💯', '💩',
+    '🎉', '🤡', '😭', '😡', '😱', '🤫', '🏆',
+    '🎯', '🚀', '⭐', '⚡', '✨', '💪', '🤝',
+    '🇵🇪', '🇧🇷', '👾', '🕹️', '🛡️', '⚔️', '💣'
+  ];
+
+  function populateEmojiGrid() {
+    el.emojiGrid.innerHTML = '';
+    EMOJIS.forEach(emoji => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'emoji-btn';
+      btn.textContent = emoji;
+      btn.addEventListener('click', () => {
+        insertEmoji(emoji);
+        el.emojiPickerPopup.classList.remove('visible');
+      });
+      el.emojiGrid.appendChild(btn);
+    });
+  }
+
+  function insertEmoji(emoji) {
+    const input = el.chatInput;
+    const start = input.selectionStart || input.value.length;
+    const end = input.selectionEnd || input.value.length;
+    input.value = input.value.substring(0, start) + emoji + input.value.substring(end);
+    input.focus();
+    input.selectionStart = input.selectionEnd = start + emoji.length;
+  }
+
+  el.btnOpenEmojiPicker.addEventListener('click', (e) => {
+    e.stopPropagation();
+    el.emojiPickerPopup.classList.toggle('visible');
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!el.emojiPickerPopup.contains(e.target) && e.target !== el.btnOpenEmojiPicker) {
+      el.emojiPickerPopup.classList.remove('visible');
+    }
   });
 
   // -------------------------------------------------------------
-  // Quick Connect Modal (First-run / Change Server)
+  // Profile Picture Upload (Feature 2)
+  // -------------------------------------------------------------
+  el.btnUserProfile.addEventListener('click', () => el.avatarFileInput.click());
+  el.btnUploadAvatarSettings.addEventListener('click', () => el.avatarFileInput.click());
+
+  el.btnRemoveAvatarSettings.addEventListener('click', () => {
+    state.avatar = null;
+    localStorage.removeItem('ps_avatar');
+    updateLocalProfileUI();
+    signaling.sendUserState({ avatar: null });
+    renderParticipants();
+  });
+
+  el.avatarFileInput.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        // Compress avatar to 64x64 JPEG
+        const canvas = document.createElement('canvas');
+        canvas.width = 64;
+        canvas.height = 64;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, 64, 64);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.75);
+
+        state.avatar = dataUrl;
+        localStorage.setItem('ps_avatar', dataUrl);
+        updateLocalProfileUI();
+        signaling.sendUserState({ avatar: dataUrl });
+        renderParticipants();
+      };
+      img.src = event.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+
+  function updateLocalProfileUI() {
+    el.localUsernameDisplay.textContent = state.username;
+    if (state.avatar) {
+      el.localAvatar.innerHTML = `<img src="${state.avatar}" alt="${escapeHtml(state.username)}">`;
+      el.settingsAvatarPreview.innerHTML = `<img src="${state.avatar}" alt="${escapeHtml(state.username)}">`;
+    } else {
+      const initial = state.username.charAt(0).toUpperCase();
+      el.localAvatar.textContent = initial;
+      el.settingsAvatarPreview.textContent = initial;
+    }
+  }
+
+  // -------------------------------------------------------------
+  // Theme Switching (Dark & Light)
+  // -------------------------------------------------------------
+  function applyTheme(theme) {
+    state.theme = theme;
+    localStorage.setItem('ps_theme', theme);
+    document.documentElement.setAttribute('data-theme', theme);
+    if (theme === 'dark') {
+      el.iconThemeSun.style.display = 'none';
+      el.iconThemeMoon.style.display = 'block';
+    } else {
+      el.iconThemeSun.style.display = 'block';
+      el.iconThemeMoon.style.display = 'none';
+    }
+  }
+
+  el.btnToggleTheme.addEventListener('click', () => {
+    const nextTheme = state.theme === 'dark' ? 'light' : 'dark';
+    applyTheme(nextTheme);
+  });
+
+  // -------------------------------------------------------------
+  // Server Quick Connect Modal
   // -------------------------------------------------------------
   el.serverTitleText.style.cursor = 'pointer';
-  el.serverTitleText.title = 'Clic para cambiar servidor';
   el.serverTitleText.addEventListener('click', () => openConnectModal());
   el.serverStatusDot.style.cursor = 'pointer';
   el.serverStatusDot.addEventListener('click', () => openConnectModal());
   if (el.btnChangeServerPill) el.btnChangeServerPill.addEventListener('click', () => openConnectModal());
   if (el.btnServerConnectHeader) el.btnServerConnectHeader.addEventListener('click', () => openConnectModal());
 
-  function openConnectModal() {
+  function openConnectModal(errorMessage = null) {
     el.quickInputUsername.value = state.username;
     el.quickInputServerUrl.value = state.serverUrl || DEFAULT_SERVER_URL;
+    if (errorMessage) {
+      el.quickConnectError.textContent = errorMessage;
+      el.quickConnectError.style.display = 'block';
+    } else {
+      el.quickConnectError.style.display = 'none';
+    }
     el.connectServerModal.classList.remove('hidden');
     setTimeout(() => {
       if (el.quickInputUsername) el.quickInputUsername.focus();
@@ -615,7 +1047,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     const user = el.quickInputUsername.value.trim();
     let url = el.quickInputServerUrl.value.trim() || DEFAULT_SERVER_URL;
 
-    // Automatically convert https:// to wss:// or http:// to ws://
     if (url.startsWith('https://')) {
       url = url.replace('https://', 'wss://');
     } else if (url.startsWith('http://')) {
@@ -627,9 +1058,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (user) {
       state.username = user;
       localStorage.setItem('ps_username', user);
-      el.localUsernameDisplay.textContent = user;
-      el.localAvatar.textContent = user.charAt(0).toUpperCase();
       el.inputUsername.value = user;
+      updateLocalProfileUI();
     }
 
     state.serverUrl = url;
@@ -641,7 +1071,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     signaling.connect(url);
   });
 
-  // Settings Modal Controls
+  // -------------------------------------------------------------
+  // Settings Modal Controls & Audio Processing (Feature 1 & Bug 5)
+  // -------------------------------------------------------------
   el.btnOpenSettings.addEventListener('click', () => openSettings());
   el.btnOpenSettingsTop.addEventListener('click', () => openSettings());
   el.btnCloseSettings.addEventListener('click', () => closeSettings());
@@ -662,10 +1094,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (newUsername && newUsername !== state.username) {
       state.username = newUsername;
       localStorage.setItem('ps_username', state.username);
-      el.localUsernameDisplay.textContent = state.username;
-      el.localAvatar.textContent = state.username.charAt(0).toUpperCase();
+      updateLocalProfileUI();
       if (state.isConnectedToVoice && state.currentRoom) {
-        signaling.joinRoom(state.currentRoom, state.peerId, state.username);
+        signaling.joinRoom(state.currentRoom, state.peerId, state.username, state.avatar);
       }
     }
 
@@ -678,11 +1109,24 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const mode = el.selectInputMode.value;
     audio.setInputMode(mode);
-    el.localModeDisplay.textContent = mode === 'ptt' ? 'Push-To-Talk (' + state.shortcuts.ptt + ')' : 'VAD Activo';
+    el.localModeDisplay.textContent = mode === 'ptt' ? `PTT (${state.shortcuts.ptt})` : 'VAD Activo';
 
     syncShortcutsWithElectron();
     closeSettings();
   }
+
+  // Live Audio Processing Toggles (Feature 1)
+  el.toggleNoiseSuppression.addEventListener('change', (e) => {
+    audio.setAudioProcessing({ noiseSuppression: e.target.checked });
+  });
+
+  el.toggleEchoCancellation.addEventListener('change', (e) => {
+    audio.setAudioProcessing({ echoCancellation: e.target.checked });
+  });
+
+  el.toggleAutoGain.addEventListener('change', (e) => {
+    audio.setAudioProcessing({ autoGainControl: e.target.checked });
+  });
 
   // Settings Tabs Switcher
   el.modalTabs.forEach(tab => {
@@ -699,18 +1143,24 @@ document.addEventListener('DOMContentLoaded', async () => {
   async function populateAudioDevices() {
     const devices = await audio.getDevices();
     el.selectAudioInput.innerHTML = '<option value="">Predeterminado del sistema</option>';
+    const savedDeviceId = localStorage.getItem('ps_audio_device');
+
     devices.inputs.forEach(d => {
       const opt = document.createElement('option');
       opt.value = d.deviceId;
       opt.textContent = d.label || `Micrófono (${d.deviceId.slice(0, 6)})`;
+      if (d.deviceId === savedDeviceId) {
+        opt.selected = true;
+      }
       el.selectAudioInput.appendChild(opt);
     });
   }
 
+  // Bug 5: Persist audio device selection
   el.selectAudioInput.addEventListener('change', async (e) => {
-    if (e.target.value) {
-      await audio.init(e.target.value);
-    }
+    const devId = e.target.value;
+    localStorage.setItem('ps_audio_device', devId);
+    await audio.init(devId || null);
   });
 
   el.btnReconnectServer.addEventListener('click', () => {
@@ -719,7 +1169,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     signaling.connect(state.serverUrl);
   });
 
+  // -------------------------------------------------------------
   // Shortcuts & Key Recorder
+  // -------------------------------------------------------------
   function updateShortcutButtonsUI() {
     el.btnKeyMute.textContent = state.shortcuts.toggleMute;
     el.btnKeyDeafen.textContent = state.shortcuts.toggleDeafen;
@@ -750,48 +1202,61 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   window.addEventListener('keydown', (e) => {
+    // If recording a shortcut in settings
     if (state.recordingAction) {
       e.preventDefault();
       e.stopPropagation();
 
-      if (['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) return;
+      const parts = [];
+      if (e.ctrlKey) parts.push('Ctrl');
+      if (e.shiftKey) parts.push('Shift');
+      if (e.altKey) parts.push('Alt');
 
-      const keys = [];
-      if (e.ctrlKey) keys.push('Ctrl');
-      if (e.shiftKey) keys.push('Shift');
-      if (e.altKey) keys.push('Alt');
+      let keyName = e.key;
+      if (['Control', 'Shift', 'Alt'].includes(keyName)) return;
 
-      let keyName = e.key.toUpperCase();
       if (keyName === ' ') keyName = 'Space';
-      if (keyName.startsWith('ARROW')) keyName = keyName.replace('ARROW', '');
+      else if (keyName.length === 1) keyName = keyName.toUpperCase();
 
-      keys.push(keyName);
-      const accelerator = keys.join('+');
+      parts.push(keyName);
+      const accelerator = parts.join('+');
 
       state.shortcuts[state.recordingAction] = accelerator;
       localStorage.setItem('ps_shortcuts', JSON.stringify(state.shortcuts));
-
       stopShortcutRecording();
       syncShortcutsWithElectron();
       return;
     }
 
-    if (audio.inputMode === 'ptt') {
-      const pttKey = state.shortcuts.ptt.toUpperCase();
-      if (e.key.toUpperCase() === pttKey) {
+    // In-app PTT key listener
+    if (audio.inputMode === 'ptt' && state.shortcuts.ptt) {
+      if (matchesAccelerator(e, state.shortcuts.ptt)) {
         audio.pttKeyDown();
       }
     }
   });
 
   window.addEventListener('keyup', (e) => {
-    if (audio.inputMode === 'ptt') {
-      const pttKey = state.shortcuts.ptt.toUpperCase();
-      if (e.key.toUpperCase() === pttKey) {
+    if (audio.inputMode === 'ptt' && state.shortcuts.ptt) {
+      if (matchesAccelerator(e, state.shortcuts.ptt)) {
         audio.pttKeyUp();
       }
     }
   });
+
+  function matchesAccelerator(event, accelerator) {
+    const parts = accelerator.split('+');
+    const key = parts[parts.length - 1];
+    const hasCtrl = parts.includes('Ctrl');
+    const hasShift = parts.includes('Shift');
+    const hasAlt = parts.includes('Alt');
+
+    if (event.ctrlKey !== hasCtrl) return false;
+    if (event.shiftKey !== hasShift) return false;
+    if (event.altKey !== hasAlt) return false;
+
+    return event.key.toUpperCase() === key.toUpperCase() || event.code.toUpperCase() === key.toUpperCase();
+  }
 
   function syncShortcutsWithElectron() {
     if (window.electronAPI && window.electronAPI.updateShortcuts) {
@@ -799,38 +1264,38 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
-  // Listen to Global Shortcut triggers from Electron
-  if (window.electronAPI && window.electronAPI.onShortcutTriggered) {
-    window.electronAPI.onShortcutTriggered((action) => {
-      switch (action) {
-        case 'toggleMute':
-          audio.toggleMute();
-          break;
-        case 'toggleDeafen':
-          audio.toggleDeafen();
-          break;
-        case 'toggleScreen':
-          toggleScreenShare();
-          break;
-        case 'pttDown':
-          audio.pttKeyDown();
-          break;
-        case 'pttUp':
-          audio.pttKeyUp();
-          break;
-      }
-    });
+  // Electron IPC Listeners
+  if (window.electronAPI) {
+    if (window.electronAPI.onShortcut) {
+      window.electronAPI.onShortcut((action) => {
+        switch (action) {
+          case 'toggleMute':
+            audio.toggleMute();
+            break;
+          case 'toggleDeafen':
+            audio.toggleDeafen();
+            break;
+          case 'toggleScreen':
+            handleScreenShareButton();
+            break;
+          case 'pttDown':
+            audio.pttKeyDown();
+            break;
+          case 'pttUp':
+            audio.pttKeyUp();
+            break;
+        }
+      });
+    }
 
     el.btnMinimize.addEventListener('click', () => window.electronAPI.minimize());
     el.btnMaximize.addEventListener('click', () => window.electronAPI.maximize());
     el.btnClose.addEventListener('click', () => window.electronAPI.close());
-
-    syncShortcutsWithElectron();
   }
 
   function escapeHtml(str) {
     if (!str) return '';
-    return str
+    return String(str)
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
