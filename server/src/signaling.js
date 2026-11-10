@@ -11,6 +11,7 @@ class SignalingServer {
     this.host = options.host || process.env.HOST || '0.0.0.0';
     this.rooms = new Map(); // roomId -> Map(peerId -> { ws, username, avatar, isSharingScreen, isMuted, isDeafened, isSpeaking })
     this.peers = new Map(); // ws -> { peerId, username, avatar, roomId, isAlive }
+    this.chatHistory = new Map(); // textChannelId -> [messages] (last CHAT_HISTORY_LIMIT)
     this.server = null;
     this.wss = null;
     this.heartbeatInterval = null;
@@ -54,6 +55,12 @@ class SignalingServer {
         this.send(ws, {
           type: 'server-state',
           rooms: this.getServerState()
+        });
+
+        // Text channels are server-wide: send recent history so new/late users catch up
+        this.send(ws, {
+          type: 'chat-history',
+          channels: Object.fromEntries(this.chatHistory)
         });
 
         ws.on('pong', () => {
@@ -298,18 +305,34 @@ class SignalingServer {
       }
 
       case 'chat-message': {
-        const targetRoom = message.roomId || peerState.roomId;
-        if (!targetRoom || (!message.text && !message.image)) return;
-        this.broadcastToRoom(targetRoom, null, {
+        // Text channels are independent from voice rooms: every connected user can read and
+        // write in any of them, whether or not they are in a voice channel.
+        const targetChannel = String(message.roomId || 'general');
+        if (!SignalingServer.isValidTextChannel(targetChannel)) return;
+        if (!message.text && !message.image) return;
+        const image = message.image ? String(message.image) : null;
+        if (image && (!image.startsWith('data:image/') || image.length > SignalingServer.MAX_CHAT_IMAGE_CHARS)) return;
+
+        const chatMsg = {
           type: 'chat-message',
-          roomId: targetRoom,
-          senderPeerId: peerState.peerId,
-          username: peerState.username,
-          avatar: peerState.avatar,
+          id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+          roomId: targetChannel,
+          senderPeerId: peerState.peerId || (message.peerId ? String(message.peerId).slice(0, 64) : null),
+          username: peerState.peerId ? peerState.username : String(message.username || peerState.username).slice(0, 32),
+          avatar: peerState.peerId ? peerState.avatar : (message.avatar || null),
           text: message.text ? String(message.text).slice(0, 1000) : '',
-          image: message.image ? String(message.image) : null,
+          image,
           timestamp: Date.now()
-        });
+        };
+
+        const history = this.chatHistory.get(targetChannel) || [];
+        history.push(chatMsg);
+        while (history.length > SignalingServer.CHAT_HISTORY_LIMIT) history.shift();
+        this.chatHistory.set(targetChannel, history);
+
+        for (const clientWs of this.peers.keys()) {
+          this.send(clientWs, chatMsg);
+        }
         break;
       }
 
@@ -381,14 +404,19 @@ class SignalingServer {
       }
     }
 
+    // Keep isSharingScreen: a streamer who switches voice channel keeps streaming and the
+    // new room must know it (it is cleared by an explicit screen-state or on disconnect).
     peerState.roomId = null;
-    peerState.isSharingScreen = false;
   }
 
   handleDisconnect(ws) {
     this.leaveRoom(ws);
     this.peers.delete(ws);
     this.broadcastServerState();
+  }
+
+  static isValidTextChannel(id) {
+    return typeof id === 'string' && /^[a-z0-9][a-z0-9-]{0,31}$/.test(id);
   }
 
   close() {
@@ -407,6 +435,9 @@ class SignalingServer {
     });
   }
 }
+
+SignalingServer.CHAT_HISTORY_LIMIT = 50;
+SignalingServer.MAX_CHAT_IMAGE_CHARS = 3 * 1024 * 1024;
 
 // Start standalone if invoked directly
 if (require.main === module) {

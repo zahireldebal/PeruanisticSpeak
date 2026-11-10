@@ -174,6 +174,52 @@ async function runTests() {
   const chatReceivedB = await chatPromiseB;
   assert(chatReceivedB.senderPeerId === 'peer-a' && chatReceivedB.text === 'Hola gentita, probando micro', 'Client B receives chat message in room');
 
+  // 9b. Text channels are server-wide (not tied to the voice room)
+  const waitForMsg = (ws, pred) => new Promise((resolve) => {
+    const handler = (msg) => {
+      const parsed = JSON.parse(msg.toString());
+      if (pred(parsed)) { ws.off('message', handler); resolve(parsed); }
+    };
+    ws.on('message', handler);
+  });
+
+  const wsD = new WebSocket(`ws://127.0.0.1:${testPort}`);
+  const historyD = waitForMsg(wsD, m => m.type === 'chat-history');
+  await new Promise(r => wsD.on('open', r));
+  await historyD;
+  const generalAtD = waitForMsg(wsD, m => m.type === 'chat-message' && m.roomId === 'general');
+  wsA.send(JSON.stringify({ type: 'chat-message', roomId: 'general', text: 'Mensaje para todos' }));
+  const gD = await generalAtD;
+  assert(gD.text === 'Mensaje para todos' && gD.username === 'GamerA' && gD.id, 'User outside any voice room receives #general messages');
+
+  const fromDAtB = waitForMsg(wsB, m => m.type === 'chat-message' && m.roomId === 'voz-2');
+  wsD.send(JSON.stringify({ type: 'chat-message', roomId: 'voz-2', text: 'Hola desde afuera', peerId: 'peer-d', username: 'GamerD' }));
+  const dB = await fromDAtB;
+  assert(dB.username === 'GamerD' && dB.senderPeerId === 'peer-d', 'User outside voice can write in #voz-2 and others in voz-1 receive it');
+
+  const badAtB = waitForMsg(wsB, m => m.type === 'chat-message' && m.text === 'canal invalido');
+  wsD.send(JSON.stringify({ type: 'chat-message', roomId: '../../etc', text: 'canal invalido' }));
+  const okAtB = waitForMsg(wsB, m => m.type === 'chat-message' && m.text === 'canal valido');
+  wsD.send(JSON.stringify({ type: 'chat-message', roomId: 'sala-afk', text: 'canal valido', username: 'GamerD' }));
+  const first = await Promise.race([badAtB.then(() => 'bad'), okAtB.then(() => 'ok')]);
+  assert(first === 'ok', 'Invalid text channel ids are rejected, #sala-afk works');
+
+  // 9c. Late connection receives recent chat history
+  const wsE = new WebSocket(`ws://127.0.0.1:${testPort}`);
+  const historyE = waitForMsg(wsE, m => m.type === 'chat-history');
+  await new Promise(r => wsE.on('open', r));
+  const hE = await historyE;
+  assert(hE.channels.general && hE.channels.general.some(m => m.text === 'Mensaje para todos') && hE.channels['voz-2'].length === 1, 'New connection receives per-channel chat history');
+  wsE.close();
+
+  // 9d. Streamer switching voice room keeps its "sharing" state
+  const stateAfterSwitch = waitForMsg(wsD, m => m.type === 'server-state' && m.rooms['voz-2']);
+  wsA.send(JSON.stringify({ type: 'join', roomId: 'voz-2', peerId: 'peer-a', username: 'GamerA' }));
+  const sA = await stateAfterSwitch;
+  assert(sA.rooms['voz-2'][0].peerId === 'peer-a' && sA.rooms['voz-2'][0].isSharingScreen === true, 'Streamer who switches room is still marked as sharing');
+  wsA.send(JSON.stringify({ type: 'join', roomId: 'voz-1', peerId: 'peer-a', username: 'GamerA' }));
+  wsD.close();
+
   // 10. Disconnect and user-left broadcast
   const leftPromiseB = new Promise((resolve) => {
     wsB.on('message', (msg) => {

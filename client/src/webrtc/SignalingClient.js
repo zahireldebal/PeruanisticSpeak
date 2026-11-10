@@ -180,15 +180,22 @@ class SignalingClient {
     });
   }
 
-  sendChatMessage(text, image = null, roomId = null) {
-    const room = roomId || this.currentRoom;
-    if (!room || (!text && !image)) return;
-    this.send({
+  sendChatMessage(text, image = null, roomId = null, identity = null) {
+    const room = roomId || this.currentRoom || 'general';
+    if (!text && !image) return;
+    const payload = {
       type: 'chat-message',
       roomId: room,
       text,
       image
-    });
+    };
+    // Identity is only used by the server when we are not in a voice room
+    if (identity) {
+      payload.peerId = identity.peerId;
+      payload.username = identity.username;
+      payload.avatar = identity.avatar || null;
+    }
+    this.send(payload);
   }
 
   leaveRoom() {
@@ -233,6 +240,9 @@ class SignalingClient {
         break;
       case 'chat-message':
         this.emit('chat-message', message);
+        break;
+      case 'chat-history':
+        this.emit('chat-history', message.channels || {});
         break;
       case 'error':
         this.emit('server-error', message);
