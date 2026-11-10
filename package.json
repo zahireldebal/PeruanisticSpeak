@@ -1,0 +1,23 @@
+{
+  "name": "peruanisticspeak",
+  "version": "1.0.0",
+  "description": "Ultra-lightweight gaming voice, screen-sharing and chat client",
+  "main": "server/src/signaling.js",
+  "type": "commonjs",
+  "scripts": {
+    "server": "node server/src/signaling.js",
+    "test:server": "node server/tests/signaling.test.js"
+  },
+  "keywords": [
+    "webrtc",
+    "voice",
+    "gaming",
+    "screenshare",
+    "electron"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "ws": "^8.22.2"
+  }
+}
