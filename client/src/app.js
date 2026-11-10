@@ -122,6 +122,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   const audio = new AudioManager();
   const screen = new ScreenShareManager();
   const peers = new PeerManager(signaling, audio, screen);
+  const sounds = new SoundEffects();
+
+  signaling.on('user-joined', () => {
+    sounds.playJoin();
+  });
+
+  signaling.on('user-left', () => {
+    sounds.playLeave();
+  });
 
   // Initialize Microphone
   try {
@@ -181,6 +190,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   audio.on('deafen-change', (isDeafened) => {
+    sounds.isEnabled = !isDeafened;
     if (isDeafened) {
       el.btnToggleDeafen.classList.add('active-danger');
     } else {
@@ -378,6 +388,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       state.currentRoom = chId;
       el.currentChannelHeader.textContent = chId;
       signaling.joinRoom(state.currentRoom, state.peerId, state.username);
+      sounds.playJoin();
       renderParticipants();
     });
   });
@@ -452,6 +463,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Disconnect from Voice (Bug 1 Fix)
   el.btnDisconnectVoice.addEventListener('click', () => {
+    sounds.playLeave();
     signaling.leaveRoom();
     screen.stop();
     peers.destroy();

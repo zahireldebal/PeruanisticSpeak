@@ -22,7 +22,7 @@ class SignalingServer {
         if (req.url === '/health' || req.url === '/') {
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({
-            status: 'online',
+            status: 'ok',
             service: 'PeruanisticSPEAK Signaling Server',
             version: '1.0.0',
             activeRooms: this.rooms.size,
