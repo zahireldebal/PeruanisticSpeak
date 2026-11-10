@@ -7,6 +7,13 @@
 document.addEventListener('DOMContentLoaded', async () => {
   console.log('[App] Initializing PeruanisticSPEAK v1.0...');
 
+  const EMOJIS = [
+    '😀', '😂', '🤣', '😎', '🔥', '💀', '🎮',
+    '👑', '👍', '👎', '❤️', '👀', '💯', '💩',
+    '🎉', '🤡', '😭', '😡', '😱', '🤫', '🏆',
+    '🎯', '🚀', '⭐', '⚡', '✨', '💪', '🤝',
+    '🇵🇪', '🇧🇷', '👾', '🕹️', '🛡️', '⚔️', '💣'
+  ];
   const DEFAULT_SERVER_URL = 'wss://peruanisticspeak.onrender.com';
 
   // -------------------------------------------------------------
@@ -38,9 +45,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   localStorage.setItem('ps_peer_id', state.peerId);
   localStorage.setItem('ps_username', state.username);
 
-  // Apply Theme
-  applyTheme(state.theme);
-
+  
   // -------------------------------------------------------------
   // DOM References
   // -------------------------------------------------------------
@@ -169,7 +174,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     btnQuickConnectSubmit: document.getElementById('btnQuickConnectSubmit')
   };
 
-  // Update UI user profile on start
+  // Update UI theme and user profile on start
+  applyTheme(state.theme);
   updateLocalProfileUI();
   el.inputUsername.value = state.username;
   el.inputServerUrl.value = state.serverUrl;
@@ -191,13 +197,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   el.toggleEchoCancellation.checked = !!audio.audioProcessing.echoCancellation;
   el.toggleAutoGain.checked = !!audio.audioProcessing.autoGainControl;
 
-  // Initialize Microphone (Bug 5: restores saved deviceId automatically)
-  try {
-    await audio.init();
+  // Initialize Microphone asynchronously without blocking UI listeners
+  audio.init().then(() => {
     populateAudioDevices();
-  } catch (err) {
+  }).catch((err) => {
     console.warn('[App] Microphone init note:', err);
-  }
+  });
 
   // Connect to Signaling Server
   function connectSignaling() {
@@ -790,7 +795,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         el.chatPreviewThumb.src = dataUrl;
         el.chatPreviewFileName.textContent = file.name || 'Captura de pantalla';
         el.chatImagePreviewBar.style.display = 'flex';
-        el.chatInput.focus();
+        if (el.chatInput && typeof el.chatInput.focus === "function") el.chatInput.focus();
       };
       img.src = event.target.result;
     };
@@ -898,13 +903,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // -------------------------------------------------------------
   // Emoji Picker (Feature 6)
   // -------------------------------------------------------------
-  const EMOJIS = [
-    '😀', '😂', '🤣', '😎', '🔥', '💀', '🎮',
-    '👑', '👍', '👎', '❤️', '👀', '💯', '💩',
-    '🎉', '🤡', '😭', '😡', '😱', '🤫', '🏆',
-    '🎯', '🚀', '⭐', '⚡', '✨', '💪', '🤝',
-    '🇵🇪', '🇧🇷', '👾', '🕹️', '🛡️', '⚔️', '💣'
-  ];
+  
 
   function populateEmojiGrid() {
     el.emojiGrid.innerHTML = '';
@@ -926,7 +925,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const start = input.selectionStart || input.value.length;
     const end = input.selectionEnd || input.value.length;
     input.value = input.value.substring(0, start) + emoji + input.value.substring(end);
-    input.focus();
+    if (input && typeof input.focus === "function") input.focus();
     input.selectionStart = input.selectionEnd = start + emoji.length;
   }
 
@@ -999,14 +998,18 @@ document.addEventListener('DOMContentLoaded', async () => {
   // -------------------------------------------------------------
   function applyTheme(theme) {
     state.theme = theme;
-    localStorage.setItem('ps_theme', theme);
+    try {
+      localStorage.setItem('ps_theme', theme);
+    } catch (_) {}
     document.documentElement.setAttribute('data-theme', theme);
-    if (theme === 'dark') {
-      el.iconThemeSun.style.display = 'none';
-      el.iconThemeMoon.style.display = 'block';
-    } else {
-      el.iconThemeSun.style.display = 'block';
-      el.iconThemeMoon.style.display = 'none';
+    if (typeof el !== 'undefined' && el && el.iconThemeSun && el.iconThemeMoon) {
+      if (theme === 'dark') {
+        el.iconThemeSun.style.display = 'none';
+        el.iconThemeMoon.style.display = 'block';
+      } else {
+        el.iconThemeSun.style.display = 'block';
+        el.iconThemeMoon.style.display = 'none';
+      }
     }
   }
 
@@ -1036,7 +1039,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     el.connectServerModal.classList.remove('hidden');
     setTimeout(() => {
-      if (el.quickInputUsername) el.quickInputUsername.focus();
+      if (el.quickInputUsername && typeof el.quickInputUsername.focus === "function") el.quickInputUsername.focus();
     }, 150);
   }
 
