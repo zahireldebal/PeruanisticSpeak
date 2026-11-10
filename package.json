@@ -12,10 +12,10 @@
     "test:client": "node client/tests/webrtc.test.js",
     "test": "node server/tests/signaling.test.js && node client/tests/webrtc.test.js",
     "pack": "electron-builder --dir",
-    "dist": "electron-builder --win portable"
+    "dist": "electron-builder --win nsis"
   },
   "build": {
-    "appId": "com.peruanisticspeak.app",
+    "appId": "com.zahireldebal.peruanisticspeak",
     "productName": "PeruanisticSPEAK",
     "directories": {
       "output": "dist"
@@ -27,8 +27,21 @@
     ],
     "win": {
       "target": [
-        "portable"
-      ]
+        "nsis"
+      ],
+      "icon": "client/public/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "PeruanisticSPEAK",
+      "uninstallDisplayName": "PeruanisticSPEAK 1.0",
+      "artifactName": "${productName} Setup ${version}.${ext}",
+      "installerIcon": "client/public/icon.ico",
+      "uninstallerIcon": "client/public/icon.ico",
+      "deleteAppDataOnUninstall": false
     }
   },
   "keywords": [
@@ -38,7 +51,7 @@
     "screenshare",
     "electron"
   ],
-  "author": "",
+  "author": "zahir el debal",
   "license": "MIT",
   "dependencies": {
     "ws": "^8.22.2"

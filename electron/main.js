@@ -16,6 +16,7 @@ function createWindow() {
     minWidth: 960,
     minHeight: 540,
     frame: false,
+    icon: path.join(__dirname, '../client/public/icon.png'),
     backgroundColor: '#1A1B1E',
     show: false,
     webPreferences: {
@@ -39,6 +40,22 @@ function createWindow() {
   });
 
   session.defaultSession.setDevicePermissionHandler(() => true);
+
+  // Allow getDisplayMedia to capture screen or window directly
+  if (session.defaultSession.setDisplayMediaRequestHandler) {
+    session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
+      desktopCapturer.getSources({ types: ['screen', 'window'] }).then((sources) => {
+        if (sources && sources.length > 0) {
+          callback({ video: sources[0] });
+        } else {
+          callback({});
+        }
+      }).catch((err) => {
+        console.error('[Electron] Display media request error:', err);
+        callback({});
+      });
+    });
+  }
 
   mainWindow.on('closed', () => {
     mainWindow = null;
@@ -140,3 +157,4 @@ ipcMain.handle('get-screen-sources', async () => {
     return [];
   }
 });
+

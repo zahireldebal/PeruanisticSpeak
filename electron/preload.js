@@ -23,3 +23,4 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return await ipcRenderer.invoke('get-screen-sources');
   }
 });
+

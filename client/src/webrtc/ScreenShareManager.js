@@ -61,25 +61,38 @@ class ScreenShareManager {
     try {
       const constraints = this.getConstraints(preset);
 
-      // In Electron environment with source selection:
-      if (sourceId && window.electronAPI && window.electronAPI.isElectron) {
-        constraints.video.mandatory = {
-          chromeMediaSource: 'desktop',
-          chromeMediaSourceId: sourceId,
-          minWidth: constraints.video.width.ideal,
-          maxWidth: constraints.video.width.max,
-          minHeight: constraints.video.height.ideal,
-          maxHeight: constraints.video.height.max,
-          minFrameRate: 30,
-          maxFrameRate: 30
-        };
-        delete constraints.video.width;
-        delete constraints.video.height;
-        delete constraints.video.frameRate;
+      // In Electron environment:
+      if (window.electronAPI && window.electronAPI.isElectron) {
+        let chosenId = sourceId;
+        if (!chosenId && window.electronAPI.getScreenSources) {
+          const sources = await window.electronAPI.getScreenSources();
+          if (sources && sources.length > 0) {
+            chosenId = sources[0].id;
+          }
+        }
 
-        this.screenStream = await navigator.mediaDevices.getUserMedia(constraints);
+        if (chosenId) {
+          const electronConstraints = {
+            audio: false,
+            video: {
+              mandatory: {
+                chromeMediaSource: 'desktop',
+                chromeMediaSourceId: chosenId,
+                minWidth: constraints.video.width.ideal,
+                maxWidth: constraints.video.width.max,
+                minHeight: constraints.video.height.ideal,
+                maxHeight: constraints.video.height.max,
+                minFrameRate: 30,
+                maxFrameRate: 30
+              }
+            }
+          };
+          this.screenStream = await navigator.mediaDevices.getUserMedia(electronConstraints);
+        } else {
+          this.screenStream = await navigator.mediaDevices.getDisplayMedia(constraints);
+        }
       } else {
-        // Standard WebRTC DisplayMedia
+        // Standard WebRTC DisplayMedia for browser
         this.screenStream = await navigator.mediaDevices.getDisplayMedia(constraints);
       }
 
@@ -139,3 +152,4 @@ class ScreenShareManager {
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = ScreenShareManager;
 }
+

@@ -208,12 +208,13 @@ class SignalingServer {
       }
 
       case 'chat-message': {
-        if (!peerState.roomId || !message.text) return;
+        if (!peerState.roomId || (!message.text && !message.image)) return;
         this.broadcastToRoom(peerState.roomId, null, {
           type: 'chat-message',
           senderPeerId: peerState.peerId,
           username: peerState.username,
-          text: String(message.text).slice(0, 1000), // sanitize max length
+          text: message.text ? String(message.text).slice(0, 1000) : '',
+          image: message.image ? String(message.image) : null,
           timestamp: Date.now()
         });
         break;
@@ -319,3 +320,4 @@ if (require.main === module) {
 }
 
 module.exports = SignalingServer;
+

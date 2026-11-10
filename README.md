@@ -74,3 +74,4 @@ El archivo ejecutable listo para usar se generará en la carpeta `dist/`.
 - **Electron Seguro**: `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`.
 - **Preload Aislado**: Exposición mínima y controlada de APIs nativas mediante `contextBridge`.
 - **Sanitización**: Mensajes de chat y nombres de usuario limitados y sanitizados contra inyección XSS.
+

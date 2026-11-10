@@ -222,3 +222,4 @@ class SignalingClient {
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = SignalingClient;
 }
+

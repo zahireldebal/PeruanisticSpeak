@@ -86,3 +86,4 @@ runClientTests().catch((err) => {
   console.error('Fatal client test error:', err);
   process.exit(1);
 });
+
