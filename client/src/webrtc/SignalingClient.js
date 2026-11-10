@@ -14,6 +14,7 @@ class SignalingClient {
     this.currentRoom = null;
     this.peerId = null;
     this.username = 'Gamer';
+    this.avatar = null;
   }
 
   on(event, callback) {
@@ -59,7 +60,7 @@ class SignalingClient {
 
         // Rejoin room if we reconnected
         if (this.currentRoom && this.peerId) {
-          this.joinRoom(this.currentRoom, this.peerId, this.username);
+          this.joinRoom(this.currentRoom, this.peerId, this.username, this.avatar);
         }
       };
 
@@ -108,16 +109,18 @@ class SignalingClient {
     }
   }
 
-  joinRoom(roomId, peerId, username) {
+  joinRoom(roomId, peerId, username, avatar = null) {
     this.currentRoom = roomId;
     this.peerId = peerId;
     if (username) this.username = username;
+    if (avatar !== undefined) this.avatar = avatar;
 
     this.send({
       type: 'join',
       roomId,
       peerId,
-      username: this.username
+      username: this.username,
+      avatar: this.avatar
     });
   }
 
@@ -145,6 +148,21 @@ class SignalingClient {
     });
   }
 
+  sendRequestRenegotiate(targetPeerId) {
+    this.send({
+      type: 'request-renegotiate',
+      targetPeerId
+    });
+  }
+
+  sendWatchingScreen(targetPeerId, isWatching = true) {
+    this.send({
+      type: 'watching-screen',
+      targetPeerId,
+      isWatching
+    });
+  }
+
   sendScreenState(isSharingScreen) {
     this.send({
       type: 'screen-state',
@@ -152,21 +170,24 @@ class SignalingClient {
     });
   }
 
-  sendUserState({ isMuted, isDeafened, isSpeaking }) {
+  sendUserState({ isMuted, isDeafened, isSpeaking, avatar }) {
     this.send({
       type: 'user-state',
       isMuted,
       isDeafened,
-      isSpeaking
+      isSpeaking,
+      avatar
     });
   }
 
-  sendChatMessage(text) {
-    if (!this.currentRoom || !text) return;
+  sendChatMessage(text, image = null, roomId = null) {
+    const room = roomId || this.currentRoom;
+    if (!room || (!text && !image)) return;
     this.send({
       type: 'chat-message',
-      roomId: this.currentRoom,
-      text
+      roomId: room,
+      text,
+      image
     });
   }
 
@@ -177,6 +198,9 @@ class SignalingClient {
 
   handleMessage(message) {
     switch (message.type) {
+      case 'server-state':
+        this.emit('server-state', message.rooms);
+        break;
       case 'room-users':
         this.emit('room-users', message.peers, message.roomId);
         break;
@@ -195,6 +219,12 @@ class SignalingClient {
       case 'ice-candidate':
         this.emit('ice-candidate', message.senderPeerId, message.candidate);
         break;
+      case 'request-renegotiate':
+        this.emit('request-renegotiate', message.senderPeerId);
+        break;
+      case 'viewer-update':
+        this.emit('viewer-update', message.viewerPeerId, message.viewerUsername, message.isWatching);
+        break;
       case 'peer-screen-state':
         this.emit('peer-screen-state', message.peerId, message.isSharingScreen);
         break;
@@ -203,6 +233,9 @@ class SignalingClient {
         break;
       case 'chat-message':
         this.emit('chat-message', message);
+        break;
+      case 'error':
+        this.emit('server-error', message);
         break;
       default:
         console.warn('[SignalingClient] Unhandled message:', message);
@@ -222,4 +255,3 @@ class SignalingClient {
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = SignalingClient;
 }
-

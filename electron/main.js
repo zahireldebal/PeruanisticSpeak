@@ -46,7 +46,10 @@ function createWindow() {
     session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
       desktopCapturer.getSources({ types: ['screen', 'window'] }).then((sources) => {
         if (sources && sources.length > 0) {
-          callback({ video: sources[0] });
+          callback({
+            video: sources[0],
+            audio: request.audioRequested ? 'loopback' : undefined
+          });
         } else {
           callback({});
         }

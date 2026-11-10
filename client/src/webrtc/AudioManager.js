@@ -1,6 +1,6 @@
 /**
  * AudioManager: Controls local audio capture, VAD (Voice Activity Detection),
- * Mute, Deafen, and Push-To-Talk modes.
+ * Mute, Deafen, Push-To-Talk modes and noise suppression/echo cancellation processing.
  */
 class AudioManager {
   constructor() {
@@ -22,6 +22,22 @@ class AudioManager {
     this.vadThreshold = 0.02; // Threshold for speaking detection
     this.speakingDebounceTimeout = null;
 
+    // Advanced Audio Processing (Discord style)
+    let savedProcessing = null;
+    try {
+      if (typeof localStorage !== 'undefined') {
+        const stored = localStorage.getItem('ps_audio_processing');
+        if (stored) savedProcessing = JSON.parse(stored);
+      }
+    } catch (_) {}
+
+    this.audioProcessing = Object.assign({
+      noiseSuppression: true,
+      echoCancellation: true,
+      autoGainControl: true
+    }, savedProcessing || {});
+
+    this.selectedDeviceId = null;
     this.listeners = new Map();
   }
 
@@ -53,11 +69,16 @@ class AudioManager {
 
   async init(deviceId = null) {
     try {
+      if (!deviceId && typeof localStorage !== 'undefined') {
+        deviceId = localStorage.getItem('ps_audio_device') || null;
+      }
+      this.selectedDeviceId = deviceId;
+
       const constraints = {
         audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
+          echoCancellation: !!this.audioProcessing.echoCancellation,
+          noiseSuppression: !!this.audioProcessing.noiseSuppression,
+          autoGainControl: !!this.audioProcessing.autoGainControl,
           channelCount: 1, // mono for voice optimization
           sampleRate: 48000
         },
@@ -68,24 +89,68 @@ class AudioManager {
         constraints.audio.deviceId = { exact: deviceId };
       }
 
+      // Stop any existing track before acquiring new one
+      if (this.audioTrack) {
+        this.audioTrack.stop();
+      }
+
       this.localStream = await navigator.mediaDevices.getUserMedia(constraints);
       this.audioTrack = this.localStream.getAudioTracks()[0];
+
+      if (deviceId && typeof localStorage !== 'undefined') {
+        localStorage.setItem('ps_audio_device', deviceId);
+      }
 
       this.setupAudioAnalysis();
       this.applyInputMode();
 
-      console.log('[AudioManager] Microphone initialized successfully.');
+      console.log('[AudioManager] Microphone initialized successfully. DeviceId:', deviceId || 'default');
       this.emit('ready', this.localStream);
       return this.localStream;
     } catch (err) {
       console.error('[AudioManager] Failed to access microphone:', err);
+      // Fallback if specific device failed (e.g. unplugged)
+      if (deviceId) {
+        console.warn('[AudioManager] Falling back to default audio device');
+        if (typeof localStorage !== 'undefined') localStorage.removeItem('ps_audio_device');
+        return this.init(null);
+      }
       this.emit('error', err);
       throw err;
     }
   }
 
+  async setAudioProcessing(settings) {
+    if (!settings) return;
+    if (typeof settings.noiseSuppression === 'boolean') this.audioProcessing.noiseSuppression = settings.noiseSuppression;
+    if (typeof settings.echoCancellation === 'boolean') this.audioProcessing.echoCancellation = settings.echoCancellation;
+    if (typeof settings.autoGainControl === 'boolean') this.audioProcessing.autoGainControl = settings.autoGainControl;
+
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('ps_audio_processing', JSON.stringify(this.audioProcessing));
+    }
+
+    if (this.audioTrack && this.audioTrack.applyConstraints) {
+      try {
+        await this.audioTrack.applyConstraints({
+          noiseSuppression: this.audioProcessing.noiseSuppression,
+          echoCancellation: this.audioProcessing.echoCancellation,
+          autoGainControl: this.audioProcessing.autoGainControl
+        });
+        console.log('[AudioManager] Updated audio processing constraints:', this.audioProcessing);
+      } catch (err) {
+        console.warn('[AudioManager] Failed to apply live track constraints:', err);
+      }
+    }
+  }
+
   setupAudioAnalysis() {
     try {
+      if (this.animationFrame) cancelAnimationFrame(this.animationFrame);
+      if (this.audioContext) {
+        try { this.audioContext.close(); } catch (_) {}
+      }
+
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
       if (!AudioCtx) return;
 
@@ -254,4 +319,3 @@ class AudioManager {
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = AudioManager;
 }
-

@@ -1,13 +1,15 @@
 /**
  * ScreenShareManager: Handles screen and window capturing at 720p/1080p @ 30fps,
- * optimized for gaming performance with controlled bitrates.
+ * with optional system audio transmission for gameplay, movies, and streams.
  */
 class ScreenShareManager {
   constructor() {
     this.screenStream = null;
     this.videoTrack = null;
+    this.audioTrack = null;
     this.isSharing = false;
     this.currentPreset = '720p'; // '720p' or '1080p'
+    this.captureAudio = false;
     this.listeners = new Map();
   }
 
@@ -37,29 +39,46 @@ class ScreenShareManager {
     }
   }
 
-  getConstraints(preset = '720p') {
+  setPreset(preset) {
+    if (preset === '720p' || preset === '1080p') {
+      this.currentPreset = preset;
+    }
+  }
+
+  setCaptureAudio(enable) {
+    this.captureAudio = !!enable;
+  }
+
+  getConstraints(preset = '720p', captureAudio = false) {
     this.currentPreset = preset;
+    this.captureAudio = captureAudio;
     const is1080p = preset === '1080p';
 
     return {
-      audio: false, // Voice audio is handled separately by AudioManager
+      audio: captureAudio ? {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false
+      } : false,
       video: {
         width: { ideal: is1080p ? 1920 : 1280, max: is1080p ? 1920 : 1280 },
         height: { ideal: is1080p ? 1080 : 720, max: is1080p ? 1080 : 720 },
         frameRate: { ideal: 30, max: 30 },
-        // Optimize for motion and frame stability in games
         cursor: 'always'
       }
     };
   }
 
-  async start(preset = '720p', sourceId = null) {
+  async start(preset = '720p', sourceId = null, captureAudio = false) {
     if (this.isSharing) {
       await this.stop();
     }
 
+    this.currentPreset = preset;
+    this.captureAudio = captureAudio;
+
     try {
-      const constraints = this.getConstraints(preset);
+      const constraints = this.getConstraints(preset, captureAudio);
 
       // In Electron environment:
       if (window.electronAPI && window.electronAPI.isElectron) {
@@ -73,7 +92,11 @@ class ScreenShareManager {
 
         if (chosenId) {
           const electronConstraints = {
-            audio: false,
+            audio: captureAudio ? {
+              mandatory: {
+                chromeMediaSource: 'desktop'
+              }
+            } : false,
             video: {
               mandatory: {
                 chromeMediaSource: 'desktop',
@@ -87,7 +110,19 @@ class ScreenShareManager {
               }
             }
           };
-          this.screenStream = await navigator.mediaDevices.getUserMedia(electronConstraints);
+
+          try {
+            this.screenStream = await navigator.mediaDevices.getUserMedia(electronConstraints);
+          } catch (electronMediaErr) {
+            // If audio capture failed in Electron, retry without audio
+            if (captureAudio) {
+              console.warn('[ScreenShareManager] Electron audio capture failed, retrying video only:', electronMediaErr);
+              electronConstraints.audio = false;
+              this.screenStream = await navigator.mediaDevices.getUserMedia(electronConstraints);
+            } else {
+              throw electronMediaErr;
+            }
+          }
         } else {
           this.screenStream = await navigator.mediaDevices.getDisplayMedia(constraints);
         }
@@ -97,6 +132,9 @@ class ScreenShareManager {
       }
 
       this.videoTrack = this.screenStream.getVideoTracks()[0];
+      const audioTracks = this.screenStream.getAudioTracks();
+      this.audioTrack = audioTracks.length > 0 ? audioTracks[0] : null;
+
       this.isSharing = true;
 
       // Listen for OS native "Stop sharing" event
@@ -105,8 +143,8 @@ class ScreenShareManager {
         this.handleEnded();
       };
 
-      console.log(`[ScreenShareManager] Screen sharing active (${preset} @ 30fps).`);
-      this.emit('started', this.screenStream, this.videoTrack);
+      console.log(`[ScreenShareManager] Screen sharing active (${preset} @ 30fps, audio: ${!!this.audioTrack}).`);
+      this.emit('started', this.screenStream, this.videoTrack, this.audioTrack);
       return this.screenStream;
     } catch (err) {
       console.warn('[ScreenShareManager] Screen share request cancelled or failed:', err);
@@ -120,6 +158,7 @@ class ScreenShareManager {
     this.isSharing = false;
     this.screenStream = null;
     this.videoTrack = null;
+    this.audioTrack = null;
     this.emit('stopped');
   }
 
@@ -129,6 +168,10 @@ class ScreenShareManager {
     if (this.videoTrack) {
       this.videoTrack.stop();
       this.videoTrack = null;
+    }
+    if (this.audioTrack) {
+      this.audioTrack.stop();
+      this.audioTrack = null;
     }
     if (this.screenStream) {
       this.screenStream.getTracks().forEach(t => t.stop());
@@ -140,11 +183,11 @@ class ScreenShareManager {
     console.log('[ScreenShareManager] Screen sharing stopped.');
   }
 
-  toggle(preset = '720p', sourceId = null) {
+  toggle(preset = '720p', sourceId = null, captureAudio = false) {
     if (this.isSharing) {
       return this.stop();
     } else {
-      return this.start(preset, sourceId);
+      return this.start(preset, sourceId, captureAudio);
     }
   }
 }
@@ -152,4 +195,3 @@ class ScreenShareManager {
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = ScreenShareManager;
 }
-
