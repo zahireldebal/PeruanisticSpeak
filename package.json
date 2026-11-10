@@ -6,7 +6,9 @@
   "type": "commonjs",
   "scripts": {
     "server": "node server/src/signaling.js",
-    "test:server": "node server/tests/signaling.test.js"
+    "test:server": "node server/tests/signaling.test.js",
+    "test:client": "node client/tests/webrtc.test.js",
+    "test": "node server/tests/signaling.test.js && node client/tests/webrtc.test.js"
   },
   "keywords": [
     "webrtc",

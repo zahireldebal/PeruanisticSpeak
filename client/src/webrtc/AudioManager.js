@@ -1,0 +1,256 @@
+/**
+ * AudioManager: Controls local audio capture, VAD (Voice Activity Detection),
+ * Mute, Deafen, and Push-To-Talk modes.
+ */
+class AudioManager {
+  constructor() {
+    this.localStream = null;
+    this.audioTrack = null;
+    this.audioContext = null;
+    this.analyser = null;
+    this.microphoneSource = null;
+    this.animationFrame = null;
+
+    this.isMuted = false;
+    this.isDeafened = false;
+    this.isSpeaking = false;
+    this.volume = 0;
+
+    // Modes: 'vad' (voice activity detection) | 'ptt' (push-to-talk)
+    this.inputMode = 'vad';
+    this.isPttActive = false;
+    this.vadThreshold = 0.02; // Threshold for speaking detection
+    this.speakingDebounceTimeout = null;
+
+    this.listeners = new Map();
+  }
+
+  on(event, callback) {
+    if (!this.listeners.has(event)) {
+      this.listeners.set(event, new Set());
+    }
+    this.listeners.get(event).add(callback);
+    return () => this.off(event, callback);
+  }
+
+  off(event, callback) {
+    if (this.listeners.has(event)) {
+      this.listeners.get(event).delete(callback);
+    }
+  }
+
+  emit(event, ...args) {
+    if (this.listeners.has(event)) {
+      for (const cb of this.listeners.get(event)) {
+        try {
+          cb(...args);
+        } catch (err) {
+          console.error(`[AudioManager] Listener error on ${event}:`, err);
+        }
+      }
+    }
+  }
+
+  async init(deviceId = null) {
+    try {
+      const constraints = {
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          channelCount: 1, // mono for voice optimization
+          sampleRate: 48000
+        },
+        video: false
+      };
+
+      if (deviceId) {
+        constraints.audio.deviceId = { exact: deviceId };
+      }
+
+      this.localStream = await navigator.mediaDevices.getUserMedia(constraints);
+      this.audioTrack = this.localStream.getAudioTracks()[0];
+
+      this.setupAudioAnalysis();
+      this.applyInputMode();
+
+      console.log('[AudioManager] Microphone initialized successfully.');
+      this.emit('ready', this.localStream);
+      return this.localStream;
+    } catch (err) {
+      console.error('[AudioManager] Failed to access microphone:', err);
+      this.emit('error', err);
+      throw err;
+    }
+  }
+
+  setupAudioAnalysis() {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+
+      this.audioContext = new AudioCtx();
+      this.analyser = this.audioContext.createAnalyser();
+      this.analyser.fftSize = 512;
+      this.analyser.smoothingTimeConstant = 0.4;
+
+      this.microphoneSource = this.audioContext.createMediaStreamSource(this.localStream);
+      this.microphoneSource.connect(this.analyser);
+
+      const bufferLength = this.analyser.frequencyBinCount;
+      const dataArray = new Uint8Array(bufferLength);
+
+      const checkVolume = () => {
+        if (!this.analyser || !this.audioTrack) return;
+
+        // If track is disabled or muted, volume is 0
+        if (!this.audioTrack.enabled || this.isMuted || (this.inputMode === 'ptt' && !this.isPttActive)) {
+          if (this.isSpeaking) {
+            this.setSpeaking(false);
+          }
+          this.volume = 0;
+          this.emit('volume', 0);
+          this.animationFrame = requestAnimationFrame(checkVolume);
+          return;
+        }
+
+        this.analyser.getByteTimeDomainData(dataArray);
+
+        // Compute RMS
+        let sum = 0;
+        for (let i = 0; i < bufferLength; i++) {
+          const val = (dataArray[i] - 128) / 128;
+          sum += val * val;
+        }
+        const rms = Math.sqrt(sum / bufferLength);
+        this.volume = Math.min(Math.round(rms * 100 * 2), 100);
+        this.emit('volume', this.volume);
+
+        if (this.inputMode === 'vad') {
+          if (rms > this.vadThreshold) {
+            clearTimeout(this.speakingDebounceTimeout);
+            this.setSpeaking(true);
+            this.speakingDebounceTimeout = setTimeout(() => {
+              this.setSpeaking(false);
+            }, 350);
+          }
+        }
+
+        this.animationFrame = requestAnimationFrame(checkVolume);
+      };
+
+      this.animationFrame = requestAnimationFrame(checkVolume);
+    } catch (err) {
+      console.warn('[AudioManager] AudioContext analysis not available:', err);
+    }
+  }
+
+  setSpeaking(speaking) {
+    if (this.isSpeaking !== speaking) {
+      this.isSpeaking = speaking;
+      this.emit('speaking-change', speaking);
+    }
+  }
+
+  applyInputMode() {
+    if (!this.audioTrack) return;
+
+    if (this.isMuted) {
+      this.audioTrack.enabled = false;
+      this.setSpeaking(false);
+      return;
+    }
+
+    if (this.inputMode === 'ptt') {
+      this.audioTrack.enabled = this.isPttActive;
+      this.setSpeaking(this.isPttActive);
+    } else {
+      this.audioTrack.enabled = true;
+    }
+  }
+
+  toggleMute() {
+    this.isMuted = !this.isMuted;
+    this.applyInputMode();
+    this.emit('mute-change', this.isMuted);
+    return this.isMuted;
+  }
+
+  setMute(muted) {
+    this.isMuted = !!muted;
+    this.applyInputMode();
+    this.emit('mute-change', this.isMuted);
+  }
+
+  toggleDeafen() {
+    this.isDeafened = !this.isDeafened;
+    // When deafened, user must also be muted
+    if (this.isDeafened) {
+      this.setMute(true);
+    }
+    this.emit('deafen-change', this.isDeafened);
+    return this.isDeafened;
+  }
+
+  setDeafen(deafened) {
+    this.isDeafened = !!deafened;
+    if (this.isDeafened) {
+      this.setMute(true);
+    }
+    this.emit('deafen-change', this.isDeafened);
+  }
+
+  setInputMode(mode) {
+    if (mode === 'vad' || mode === 'ptt') {
+      this.inputMode = mode;
+      this.applyInputMode();
+      this.emit('mode-change', mode);
+    }
+  }
+
+  pttKeyDown() {
+    if (this.inputMode === 'ptt' && !this.isPttActive) {
+      this.isPttActive = true;
+      this.applyInputMode();
+      this.emit('ptt-state', true);
+    }
+  }
+
+  pttKeyUp() {
+    if (this.inputMode === 'ptt' && this.isPttActive) {
+      this.isPttActive = false;
+      this.applyInputMode();
+      this.emit('ptt-state', false);
+    }
+  }
+
+  async getDevices() {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      return {
+        inputs: devices.filter(d => d.kind === 'audioinput'),
+        outputs: devices.filter(d => d.kind === 'audiooutput')
+      };
+    } catch (err) {
+      console.warn('[AudioManager] Failed to list devices:', err);
+      return { inputs: [], outputs: [] };
+    }
+  }
+
+  destroy() {
+    if (this.animationFrame) cancelAnimationFrame(this.animationFrame);
+    if (this.speakingDebounceTimeout) clearTimeout(this.speakingDebounceTimeout);
+    if (this.audioTrack) {
+      this.audioTrack.stop();
+      this.audioTrack = null;
+    }
+    if (this.audioContext) {
+      this.audioContext.close();
+      this.audioContext = null;
+    }
+  }
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = AudioManager;
+}
