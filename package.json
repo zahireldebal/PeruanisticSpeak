@@ -2,13 +2,34 @@
   "name": "peruanisticspeak",
   "version": "1.0.0",
   "description": "Ultra-lightweight gaming voice, screen-sharing and chat client",
-  "main": "server/src/signaling.js",
+  "main": "electron/main.js",
   "type": "commonjs",
   "scripts": {
+    "start": "electron .",
+    "electron:dev": "electron .",
     "server": "node server/src/signaling.js",
     "test:server": "node server/tests/signaling.test.js",
     "test:client": "node client/tests/webrtc.test.js",
-    "test": "node server/tests/signaling.test.js && node client/tests/webrtc.test.js"
+    "test": "node server/tests/signaling.test.js && node client/tests/webrtc.test.js",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder --win portable"
+  },
+  "build": {
+    "appId": "com.peruanisticspeak.app",
+    "productName": "PeruanisticSPEAK",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "client/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "portable"
+      ]
+    }
   },
   "keywords": [
     "webrtc",
@@ -21,5 +42,9 @@
   "license": "MIT",
   "dependencies": {
     "ws": "^8.22.2"
+  },
+  "devDependencies": {
+    "electron": "^45.2.3",
+    "electron-builder": "^26.18.0"
   }
 }
