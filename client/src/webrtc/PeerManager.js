@@ -17,6 +17,7 @@ class PeerManager {
     this.peerStates = new Map(); // peerId -> { username, avatar, isSharingScreen, isMuted, isDeafened, isSpeaking }
     this.screenViewers = new Map(); // viewerPeerId -> viewerUsername
     this.signalQueues = new Map(); // peerId -> Promise (serialized signaling work)
+    this.peerVolumes = PeerManager.loadVolumes(); // peerId -> 0..100 (persisted per device)
 
     this.rtcConfig = {
       iceServers: [
@@ -64,7 +65,7 @@ class PeerManager {
         this.peerStates.set(peer.peerId, { ...peer });
         // The server just told every other member that we (re)joined, so they are building a
         // fresh connection to us. Drop any stale one we still hold so both sides start clean.
-        this.resetPeer(peer.peerId);
+        this.resetPeer(peer.peerId, { initiator: true });
 
         // If the existing peer is sharing screen, ask them to (re)attach the video track
         if (peer.isSharingScreen) {
@@ -86,7 +87,7 @@ class PeerManager {
         isDeafened: false,
         isSpeaking: false
       });
-      this.resetPeer(message.peerId);
+      this.resetPeer(message.peerId, { initiator: false });
       this.emit('peers-updated', Array.from(this.peerStates.values()));
     });
 
@@ -217,15 +218,21 @@ class PeerManager {
   }
 
   /** Close any existing connection to peerId and build a fresh one. */
-  resetPeer(peerId) {
+  resetPeer(peerId, options = {}) {
     if (this.peerConnections.has(peerId)) {
       console.log(`[PeerManager] Resetting stale connection to ${peerId}`);
       this.closePeer(peerId);
     }
-    return this.createPeerConnection(peerId);
+    return this.createPeerConnection(peerId, options);
   }
 
-  createPeerConnection(peerId) {
+  /**
+   * @param {object} [options]
+   * @param {boolean} [options.initiator=true] false = wait for the remote's first offer before
+   *   sending ours. Only one side opening a fresh connection avoids the initial offer glare,
+   *   whose rollback can leave Chromium's ICE gathering stalled (no candidates, never connects).
+   */
+  createPeerConnection(peerId, options = {}) {
     if (this.peerConnections.has(peerId)) {
       return this.peerConnections.get(peerId);
     }
@@ -245,6 +252,11 @@ class PeerManager {
       videoTransceiver: null,
       screenAudioTransceiver: null,
       recoveryTimer: null,
+      connectTimer: null,
+      holdTimer: null,
+      holdOffers: options.initiator === false,
+      pendingNegotiation: false,
+      negotiate: null,
       iceRestarts: 0
     };
     this.peerMeta.set(peerId, meta);
@@ -302,8 +314,13 @@ class PeerManager {
 
     // Perfect Negotiation (W3C): parameterless setLocalDescription() builds the right
     // description for the current signaling state.
-    pc.onnegotiationneeded = async () => {
+    meta.negotiate = async () => {
       if (this.peerConnections.get(peerId) !== pc) return;
+      if (meta.holdOffers) {
+        // Waiting for the newcomer's first offer; we will offer right after answering it
+        meta.pendingNegotiation = true;
+        return;
+      }
       try {
         meta.makingOffer = true;
         await pc.setLocalDescription();
@@ -314,15 +331,58 @@ class PeerManager {
         meta.makingOffer = false;
       }
     };
+    pc.onnegotiationneeded = () => meta.negotiate();
+
+    if (meta.holdOffers) {
+      // Safety net: if the newcomer's offer never arrives, negotiate ourselves
+      meta.holdTimer = setTimeout(() => this.releaseOfferHold(peerId, meta), PeerManager.OFFER_HOLD_MS);
+    }
+
+    // Re-apply bitrate / fps limits once each negotiation settles
+    pc.onsignalingstatechange = () => {
+      if (pc.signalingState === 'stable' && meta.videoTransceiver && meta.videoTransceiver.sender.track) {
+        this.optimizeVideoBitrate(meta.videoTransceiver.sender);
+      }
+    };
+
+    // Watchdog: a connection that never reaches "connected" gets an ICE restart, then a rebuild
+    this.armConnectWatchdog(peerId, pc, meta);
 
     return pc;
+  }
+
+  releaseOfferHold(peerId, meta) {
+    clearTimeout(meta.holdTimer);
+    meta.holdTimer = null;
+    if (!meta.holdOffers) return;
+    meta.holdOffers = false;
+    if (meta.pendingNegotiation) {
+      meta.pendingNegotiation = false;
+      meta.negotiate();
+    }
+  }
+
+  armConnectWatchdog(peerId, pc, meta) {
+    clearTimeout(meta.connectTimer);
+    meta.connectTimer = setTimeout(() => {
+      if (this.peerConnections.get(peerId) !== pc || pc.connectionState === 'connected') return;
+      if (meta.iceRestarts < PeerManager.MAX_ICE_RESTARTS) {
+        console.warn(`[PeerManager] ${peerId} still "${pc.connectionState}" after ${PeerManager.CONNECT_TIMEOUT_MS} ms, restarting ICE`);
+        this.restartIce(peerId, pc, meta);
+        this.armConnectWatchdog(peerId, pc, meta);
+      } else {
+        this.hardReset(peerId);
+      }
+    }, PeerManager.CONNECT_TIMEOUT_MS);
   }
 
   handleConnectionState(peerId, pc, meta) {
     const state = pc.connectionState;
     if (state === 'connected') {
       clearTimeout(meta.recoveryTimer);
+      clearTimeout(meta.connectTimer);
       meta.recoveryTimer = null;
+      meta.connectTimer = null;
       meta.iceRestarts = 0;
       return;
     }
@@ -375,13 +435,13 @@ class PeerManager {
     // (incompatible) offer. Avoids both sides tearing down each other's fresh connection.
     if (meta && meta.isPolite) return;
     console.warn(`[PeerManager] Rebuilding connection to ${peerId}`);
-    this.resetPeer(peerId);
+    this.resetPeer(peerId, { initiator: true });
   }
 
   async handleOffer(senderPeerId, sdp, isRetry = false) {
     let pc = this.peerConnections.get(senderPeerId);
     if (!pc) {
-      pc = this.createPeerConnection(senderPeerId);
+      pc = this.createPeerConnection(senderPeerId, { initiator: false });
     }
     const meta = this.peerMeta.get(senderPeerId);
 
@@ -404,7 +464,7 @@ class PeerManager {
       if (!isRetry && this.peerStates.has(senderPeerId)) {
         console.warn(`[PeerManager] Incompatible offer from ${senderPeerId}, rebuilding connection:`, err.message);
         this.closePeer(senderPeerId);
-        this.createPeerConnection(senderPeerId);
+        this.createPeerConnection(senderPeerId, { initiator: false });
         return this.handleOffer(senderPeerId, sdp, true);
       }
       console.error(`[PeerManager] Error handling offer from ${senderPeerId}:`, err);
@@ -419,6 +479,9 @@ class PeerManager {
     } catch (err) {
       console.error(`[PeerManager] Error answering offer from ${senderPeerId}:`, err);
     }
+
+    // First offer from the newcomer answered: now we may send our own (mic, screen...)
+    if (meta.holdOffers) this.releaseOfferHold(senderPeerId, meta);
   }
 
   async handleAnswer(senderPeerId, sdp) {
@@ -479,6 +542,7 @@ class PeerManager {
       this.remoteAudioElements.set(peerId, audioEl);
     }
     audioEl.muted = this.audio.isDeafened;
+    audioEl.volume = this.getPeerVolume(peerId) / 100;
     audioEl.srcObject = new MediaStream([track]);
     audioEl.play().catch(e => console.warn('[PeerManager] Audio play note:', e));
     console.log(`[PeerManager] Attached remote voice for peer ${peerId}`);
@@ -503,6 +567,40 @@ class PeerManager {
     stream.onremovetrack = (ev) => {
       if (ev.track && ev.track.kind === 'video') onGone();
     };
+  }
+
+  /** Per-user voice volume, 0-100 (default 100). Persisted in localStorage by peerId. */
+  getPeerVolume(peerId) {
+    const v = this.peerVolumes.get(peerId);
+    return typeof v === 'number' ? v : 100;
+  }
+
+  setPeerVolume(peerId, percent) {
+    const v = Math.max(0, Math.min(100, Math.round(Number(percent) || 0)));
+    if (v === 100) {
+      this.peerVolumes.delete(peerId);
+    } else {
+      this.peerVolumes.set(peerId, v);
+    }
+    const audioEl = this.remoteAudioElements.get(peerId);
+    if (audioEl) audioEl.volume = v / 100;
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('ps_user_volumes', JSON.stringify(Object.fromEntries(this.peerVolumes)));
+      }
+    } catch (_) {}
+    this.emit('volume-change', peerId, v);
+    return v;
+  }
+
+  static loadVolumes() {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        const raw = JSON.parse(localStorage.getItem('ps_user_volumes') || '{}');
+        return new Map(Object.entries(raw).filter(([, v]) => typeof v === 'number'));
+      }
+    } catch (_) {}
+    return new Map();
   }
 
   attachMicToPeer(peerId) {
@@ -609,7 +707,11 @@ class PeerManager {
 
   closePeer(peerId) {
     const meta = this.peerMeta.get(peerId);
-    if (meta) clearTimeout(meta.recoveryTimer);
+    if (meta) {
+      clearTimeout(meta.recoveryTimer);
+      clearTimeout(meta.connectTimer);
+      clearTimeout(meta.holdTimer);
+    }
 
     if (this.peerConnections.has(peerId)) {
       const pc = this.peerConnections.get(peerId);
@@ -643,6 +745,8 @@ class PeerManager {
 PeerManager.DISCONNECT_GRACE_MS = 4000;
 PeerManager.FAILED_RESET_MS = 12000;
 PeerManager.MAX_ICE_RESTARTS = 3;
+PeerManager.OFFER_HOLD_MS = 3000;
+PeerManager.CONNECT_TIMEOUT_MS = 10000;
 
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = PeerManager;
