@@ -31,6 +31,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     activeScreenOwner: null,
     attachedImage: null,
     screenPreset: '720p',
+    screenFps: 30,
     captureScreenAudio: true,
     serverRoomsState: {},
     shortcuts: JSON.parse(localStorage.getItem('ps_shortcuts') || JSON.stringify({
@@ -131,6 +132,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     btnCloseScreenQualityModal: document.getElementById('btnCloseScreenQualityModal'),
     optPreset720p: document.getElementById('optPreset720p'),
     optPreset1080p: document.getElementById('optPreset1080p'),
+    presetOptions: document.querySelectorAll('#screenQualityModal .preset-card-option'),
     checkCaptureScreenAudio: document.getElementById('checkCaptureScreenAudio'),
     btnCancelScreenQuality: document.getElementById('btnCancelScreenQuality'),
     btnConfirmScreenQuality: document.getElementById('btnConfirmScreenQuality'),
@@ -149,6 +151,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     tabPanes: document.querySelectorAll('.tab-pane'),
     selectAudioInput: document.getElementById('selectAudioInput'),
     micVolumeBar: document.getElementById('micVolumeBar'),
+    btnVoiceTest: document.getElementById('btnVoiceTest'),
+    btnVoiceTestText: document.getElementById('btnVoiceTestText'),
+    voiceTestStatusText: document.getElementById('voiceTestStatusText'),
     selectInputMode: document.getElementById('selectInputMode'),
     selectScreenPreset: document.getElementById('selectScreenPreset'),
     toggleNoiseSuppression: document.getElementById('toggleNoiseSuppression'),
@@ -285,6 +290,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   audio.on('deafen-change', (isDeafened) => {
     sounds.isEnabled = !isDeafened;
+    // Deafen also silences the audio of a stream you are watching
+    if (state.activeScreenOwner && state.activeScreenOwner !== state.peerId) {
+      el.screenVideoElement.muted = isDeafened;
+    }
     if (isDeafened) {
       el.btnToggleDeafen.classList.add('active-danger');
     } else {
@@ -296,14 +305,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   // -------------------------------------------------------------
   // Screen Share Events
   // -------------------------------------------------------------
-  screen.on('started', (stream) => {
-    sounds.playScreenShareStart(); // Feature 4: chime on screen share start
+  screen.on('started', (stream, videoTrack, audioTrack) => {
+    // Chime on start, but not while capturing system audio (it would be the first thing
+    // viewers hear in the stream).
+    if (!audioTrack) sounds.playScreenShareStart();
     el.btnToggleScreen.classList.add('active-primary');
     el.quickShareText.textContent = 'Detener Transmisión';
     el.btnQuickShareScreen.classList.remove('btn-secondary');
     el.btnQuickShareScreen.classList.add('btn-danger');
 
-    displayScreenStream(stream, `Tú (${state.username})`, screen.currentPreset, true);
+    displayScreenStream(stream, `Tú (${state.username})`, `${screen.currentPreset} @ ${screen.currentFps}fps`, true);
   });
 
   screen.on('stopped', () => {
@@ -320,7 +331,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   peers.on('remote-screen-added', (peerId, stream) => {
     const peer = peers.peerStates.get(peerId);
     const peerName = peer ? peer.username : 'Amigo';
-    displayScreenStream(stream, peerName, '720p/1080p', false, peerId);
+    displayScreenStream(stream, peerName, describeRemoteStream(stream), false, peerId);
   });
 
   peers.on('remote-screen-removed', (peerId) => {
@@ -357,7 +368,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     el.screenOverlayTop.style.display = 'flex';
     el.screenOverlayActions.style.display = 'flex';
     el.screenBroadcasterName.textContent = title;
-    el.screenQualityBadge.textContent = `${preset} 30fps`;
+    el.screenQualityBadge.textContent = preset;
 
     if (isLocal) {
       el.screenViewerBadge.style.display = 'flex';
@@ -366,6 +377,17 @@ document.addEventListener('DOMContentLoaded', async () => {
       el.screenViewerBadge.style.display = 'none';
       el.btnStopScreenShareOverlay.style.display = 'none';
     }
+  }
+
+  // Badge for a remote stream: resolution + fps read from the received video track
+  function describeRemoteStream(stream) {
+    const track = stream && stream.getVideoTracks()[0];
+    const settings = (track && track.getSettings) ? track.getSettings() : {};
+    if (settings.height) {
+      const fps = settings.frameRate ? ` @ ${Math.round(settings.frameRate)}fps` : '';
+      return `${settings.height}p${fps}`;
+    }
+    return 'En vivo';
   }
 
   function clearScreenStream() {
@@ -652,16 +674,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     el.screenQualityModal.classList.remove('hidden');
   }
 
-  el.optPreset720p.addEventListener('click', () => {
-    state.screenPreset = '720p';
-    el.optPreset720p.classList.add('selected');
-    el.optPreset1080p.classList.remove('selected');
-  });
-
-  el.optPreset1080p.addEventListener('click', () => {
-    state.screenPreset = '1080p';
-    el.optPreset1080p.classList.add('selected');
-    el.optPreset720p.classList.remove('selected');
+  el.presetOptions.forEach(opt => {
+    opt.addEventListener('click', () => {
+      state.screenPreset = opt.dataset.preset === '1080p' ? '1080p' : '720p';
+      state.screenFps = opt.dataset.fps === '60' ? 60 : 30;
+      el.presetOptions.forEach(o => o.classList.toggle('selected', o === opt));
+    });
   });
 
   el.btnCloseScreenQualityModal.addEventListener('click', () => el.screenQualityModal.classList.add('hidden'));
@@ -674,7 +692,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (window.electronAPI && window.electronAPI.getScreenSources) {
       openScreenPicker();
     } else {
-      screen.start(state.screenPreset, null, state.captureScreenAudio).catch(err => {
+      screen.start(state.screenPreset, state.screenFps, null, state.captureScreenAudio).catch(err => {
         console.warn('[App] Screen share cancelled:', err);
       });
     }
@@ -698,7 +716,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         item.addEventListener('click', async () => {
           el.screenPickerModal.classList.add('hidden');
           try {
-            await screen.start(state.screenPreset, src.id, state.captureScreenAudio);
+            await screen.start(state.screenPreset, state.screenFps, src.id, state.captureScreenAudio);
           } catch (err) {
             console.error('[App] Failed to start screen share with source:', err);
           }
@@ -1090,6 +1108,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function closeSettings() {
     stopShortcutRecording();
+    audio.stopVoiceTest();
     el.settingsModal.classList.add('hidden');
   }
 
@@ -1157,6 +1176,28 @@ document.addEventListener('DOMContentLoaded', async () => {
         opt.selected = true;
       }
       el.selectAudioInput.appendChild(opt);
+    });
+  }
+
+  // Voice test ("Probar Voz"): hear your own mic with the current processing settings
+  function updateVoiceTestUI(isTesting) {
+    if (!el.btnVoiceTest) return;
+    el.btnVoiceTestText.textContent = isTesting ? 'Detener Prueba' : 'Probar Voz (Escucharme)';
+    el.btnVoiceTest.classList.toggle('btn-danger', isTesting);
+    el.btnVoiceTest.classList.toggle('btn-secondary', !isTesting);
+    el.voiceTestStatusText.textContent = isTesting ? 'Escuchándote...' : 'Inactivo';
+    el.voiceTestStatusText.classList.toggle('active', isTesting);
+  }
+
+  audio.on('voice-test-change', updateVoiceTestUI);
+
+  if (el.btnVoiceTest) {
+    el.btnVoiceTest.addEventListener('click', () => {
+      audio.toggleVoiceTest();
+      if (!audio.isVoiceTesting && !audio.audioTrack) {
+        el.voiceTestStatusText.textContent = 'Micrófono no disponible';
+        el.voiceTestStatusText.classList.remove('active');
+      }
     });
   }
 

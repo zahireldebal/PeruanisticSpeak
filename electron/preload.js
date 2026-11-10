@@ -21,6 +21,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Screen capture source selection
   getScreenSources: async () => {
     return await ipcRenderer.invoke('get-screen-sources');
-  }
+  },
+  // Select the source (and loopback audio mode) for the next getDisplayMedia() call
+  setScreenSource: (sourceId, audioMode) => ipcRenderer.invoke('set-screen-source', sourceId, audioMode)
 });
 

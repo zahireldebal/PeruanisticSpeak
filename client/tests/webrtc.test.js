@@ -95,6 +95,113 @@ async function runClientTests() {
   const c1080 = screen.getConstraints('1080p', true);
   assert(c1080.video.width.ideal === 1920 && c1080.video.height.ideal === 1080 && c1080.audio !== false, 'ScreenShareManager configures 1080p @ 30fps with audio enabled');
 
+  // 3b. 60 FPS support
+  const c720p60 = screen.getConstraints('720p', 60, false);
+  assert(c720p60.video.frameRate.ideal === 60 && c720p60.video.frameRate.max === 60 && c720p60.audio === false, 'ScreenShareManager configures 720p @ 60fps');
+  assert(screen.currentFps === 60, 'ScreenShareManager tracks current fps');
+
+  const c1080p60 = screen.getConstraints('1080p', 60, true);
+  assert(c1080p60.video.height.ideal === 1080 && c1080p60.video.frameRate.ideal === 60 && c1080p60.audio !== false, 'ScreenShareManager configures 1080p @ 60fps with audio');
+  assert(c1080p60.audio.restrictOwnAudio === true, 'Screen audio constraints ask to exclude the app\'s own playback');
+
+  const cBad = screen.getConstraints('720p', 144, false);
+  assert(cBad.video.frameRate.ideal === 30, 'Unsupported fps values fall back to 30');
+
+  const enc30 = ScreenShareManager.getEncodingParams('1080p', 30);
+  const enc60 = ScreenShareManager.getEncodingParams('1080p', 60);
+  assert(enc30.maxBitrate === 3500000 && enc30.maxFramerate === 30, 'Encoding: 30fps uses 3.5 Mbps / 30fps');
+  assert(enc60.maxBitrate === 6000000 && enc60.maxFramerate === 60, 'Encoding: 1080p60 uses 6 Mbps / 60fps');
+
+  // 3c. Voice test ("Probar Voz") with stubbed browser media APIs
+  global.MediaStream = class { constructor(tracks) { this.tracks = tracks || []; } getTracks() { return this.tracks; } getVideoTracks() { return this.tracks.filter(t => t.kind === 'video'); } };
+  global.Audio = class { constructor() { this.srcObject = null; this.paused = true; } play() { this.paused = false; return Promise.resolve(); } pause() { this.paused = true; } };
+  const fakeTrack = (kind = 'audio') => ({ kind, enabled: true, readyState: 'live', stopped: false, stop() { this.stopped = true; this.readyState = 'ended'; }, clone() { return fakeTrack(kind); } });
+
+  const vt = new AudioManager();
+  assert(vt.startVoiceTest() === false && vt.isVoiceTesting === false, 'Voice test refuses to start without a microphone');
+  vt.audioTrack = fakeTrack();
+  vt.audioTrack.enabled = false; // muted mic
+  let voiceEvents = [];
+  vt.on('voice-test-change', (on) => voiceEvents.push(on));
+  assert(vt.toggleVoiceTest() === true && vt.isVoiceTesting === true, 'toggleVoiceTest starts the voice test');
+  assert(vt.voiceTestTrack !== vt.audioTrack && vt.voiceTestTrack.enabled === true, 'Voice test uses an enabled clone of the mic track (works while muted)');
+  assert(vt.voiceTestElement && vt.voiceTestElement.paused === false, 'Voice test plays the mic back locally');
+  const clone = vt.voiceTestTrack;
+  assert(vt.toggleVoiceTest() === false && clone.stopped === true && vt.voiceTestElement === null, 'toggleVoiceTest stops playback and releases the clone');
+  assert(vt.audioTrack.stopped === false, 'Stopping the voice test leaves the real mic track running');
+  vt.startVoiceTest();
+  vt.destroy();
+  assert(vt.isVoiceTesting === false, 'destroy() stops an active voice test');
+  assert(voiceEvents.join(',') === 'true,false,true,false', 'voice-test-change events fire on start/stop');
+
+  // 3d. PeerManager negotiation & track routing with a mocked RTCPeerConnection
+  class FakeSender { constructor(track) { this.track = track || null; } replaceTrack(t) { this.track = t; return Promise.resolve(); } setStreams() {} getParameters() { return { encodings: [{}] }; } setParameters(p) { this.params = p; return Promise.resolve(); } }
+  class FakePC {
+    constructor() { this.transceivers = []; this.signalingState = 'stable'; this.connectionState = 'new'; this.remoteDescription = null; this.closed = false; FakePC.all.push(this); }
+    addTransceiver(trackOrKind, init = {}) { const t = { sender: new FakeSender(typeof trackOrKind === 'string' ? null : trackOrKind), direction: init.direction || 'sendrecv' }; this.transceivers.push(t); return t; }
+    async setRemoteDescription(d) { if (this.failNextSRD) { this.failNextSRD = false; throw new Error('m-lines mismatch'); } this.remoteDescription = d; this.signalingState = d.type === 'offer' ? 'have-remote-offer' : 'stable'; }
+    async setLocalDescription() { this.localDescription = { type: this.signalingState === 'have-remote-offer' ? 'answer' : 'offer', sdp: 'x' }; this.signalingState = this.localDescription.type === 'answer' ? 'stable' : 'have-local-offer'; }
+    async addIceCandidate() {}
+    restartIce() { this.iceRestarted = (this.iceRestarted || 0) + 1; }
+    close() { this.closed = true; }
+  }
+  FakePC.all = [];
+  global.RTCPeerConnection = FakePC;
+  const PeerManager = require('../src/webrtc/PeerManager');
+
+  const sig = new SignalingClient('ws://fake-host:3001');
+  const sent = [];
+  sig.peerId = 'peer_b';
+  sig.ws = { readyState: 1, send: (d) => sent.push(JSON.parse(d)) };
+  const pmAudio = new AudioManager();
+  const pmScreen = new ScreenShareManager();
+  const pm = new PeerManager(sig, pmAudio, pmScreen);
+
+  sig.handleMessage({ type: 'room-users', roomId: 'voz-1', peers: [{ peerId: 'peer_c', username: 'C' }] });
+  const pcC1 = pm.peerConnections.get('peer_c');
+  assert(pcC1 && pm.peerMeta.get('peer_c').micTransceiver, 'PeerManager creates a connection with a dedicated mic transceiver');
+
+  // Mic initialized late -> swapped into existing connections
+  pmAudio.audioTrack = fakeTrack();
+  pmAudio.emit('ready');
+  assert(pm.peerMeta.get('peer_c').micTransceiver.sender.track === pmAudio.audioTrack, 'Late microphone init is attached to existing peers');
+
+  // Re-join of the same peer replaces the stale connection
+  sig.handleMessage({ type: 'user-joined', peerId: 'peer_c', username: 'C' });
+  assert(pcC1.closed === true && pm.peerConnections.get('peer_c') !== pcC1, 'Re-joined peer gets a fresh connection (stale one closed)');
+
+  // Answer arriving in stable state is ignored (no InvalidStateError)
+  const pcC2 = pm.peerConnections.get('peer_c');
+  await pm.handleAnswer('peer_c', { type: 'answer', sdp: 'late' });
+  assert(pcC2.remoteDescription === null, 'Late answer in stable state is ignored');
+
+  // Offer that cannot be applied -> connection rebuilt and answered
+  pcC2.failNextSRD = true;
+  sent.length = 0;
+  await pm.handleOffer('peer_c', { type: 'offer', sdp: 'from-rebuilt-remote' });
+  const pcC3 = pm.peerConnections.get('peer_c');
+  assert(pcC2.closed && pcC3 !== pcC2 && sent.some(m => m.type === 'answer'), 'Incompatible offer rebuilds the connection and still answers');
+
+  // Remote tracks: mic -> voice element, screen audio -> NOT voice element
+  const micTrack = fakeTrack('audio');
+  pcC3.ontrack({ track: micTrack, streams: [new MediaStream([micTrack])] });
+  const voiceEl = pm.remoteAudioElements.get('peer_c');
+  assert(voiceEl && voiceEl.srcObject.tracks[0] === micTrack, 'Remote mic track goes to the voice audio element');
+  const scrVideo = fakeTrack('video');
+  const scrAudio = fakeTrack('audio');
+  const scrStream = new MediaStream([scrVideo, scrAudio]);
+  pcC3.ontrack({ track: scrAudio, streams: [scrStream] });
+  assert(pm.remoteAudioElements.get('peer_c').srcObject.tracks[0] === micTrack, 'Screen audio does not replace the streamer\'s voice');
+
+  // Disconnected is not fatal anymore
+  pcC3.connectionState = 'disconnected';
+  pcC3.onconnectionstatechange();
+  assert(pm.peerConnections.get('peer_c') === pcC3, 'Transient disconnect keeps the connection (recovery instead of drop)');
+  pcC3.connectionState = 'failed';
+  pcC3.onconnectionstatechange();
+  assert(pcC3.iceRestarted === 1, 'Failed connection triggers an ICE restart');
+  pm.destroy();
+
   // 4. SoundEffects methods
   const sounds = new SoundEffects();
   assert(typeof sounds.playJoin === 'function', 'SoundEffects has playJoin method');

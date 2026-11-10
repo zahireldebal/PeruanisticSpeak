@@ -2,6 +2,10 @@ const { app, BrowserWindow, globalShortcut, ipcMain, desktopCapturer, session } 
 const path = require('path');
 
 let mainWindow = null;
+let pendingScreenSourceId = null;
+// 'loopbackWithoutChrome' = system audio minus our own process tree (no feedback loop).
+// The renderer can fall back to plain 'loopback' if this mode is rejected.
+let screenAudioMode = 'loopbackWithoutChrome';
 let currentShortcuts = {
   toggleMute: 'Ctrl+Shift+M',
   toggleDeafen: 'Ctrl+Shift+D',
@@ -41,18 +45,25 @@ function createWindow() {
 
   session.defaultSession.setDevicePermissionHandler(() => true);
 
-  // Allow getDisplayMedia to capture screen or window directly
+  // getDisplayMedia handler: captures the source picked in the renderer (via
+  // 'set-screen-source') and, when audio is requested, system loopback audio
+  // EXCLUDING this app's own output ('loopbackWithoutChrome'). Without that,
+  // peers' voices and app sounds get re-captured and sent back (echo loop).
   if (session.defaultSession.setDisplayMediaRequestHandler) {
     session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
+      const wantedId = pendingScreenSourceId;
+      pendingScreenSourceId = null;
       desktopCapturer.getSources({ types: ['screen', 'window'] }).then((sources) => {
-        if (sources && sources.length > 0) {
-          callback({
-            video: sources[0],
-            audio: request.audioRequested ? 'loopback' : undefined
-          });
-        } else {
+        if (!sources || sources.length === 0) {
           callback({});
+          return;
         }
+        const source = sources.find(s => s.id === wantedId) || sources[0];
+        const streams = { video: source };
+        if (request.audioRequested) {
+          streams.audio = screenAudioMode;
+        }
+        callback(streams);
       }).catch((err) => {
         console.error('[Electron] Display media request error:', err);
         callback({});
@@ -161,3 +172,9 @@ ipcMain.handle('get-screen-sources', async () => {
   }
 });
 
+// IPC: renderer picks which source the next getDisplayMedia() call captures
+ipcMain.handle('set-screen-source', (_event, sourceId, audioMode) => {
+  pendingScreenSourceId = typeof sourceId === 'string' ? sourceId : null;
+  screenAudioMode = audioMode === 'loopback' ? 'loopback' : 'loopbackWithoutChrome';
+  return true;
+});

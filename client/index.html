@@ -368,13 +368,21 @@
         <span class="setting-desc">Elige la calidad de video y si deseas transmitir el audio del juego:</span>
 
         <div class="preset-options-grid">
-          <div class="preset-card-option selected" id="optPreset720p" data-preset="720p">
+          <div class="preset-card-option selected" id="optPreset720p" data-preset="720p" data-fps="30">
             <div class="preset-card-title">720p @ 30 FPS</div>
-            <div class="preset-card-sub">Menor ping y uso de datos. Ideal para shooters y juegos rápidos.</div>
+            <div class="preset-card-sub">Menor ping y uso de datos. Ideal para conexiones lentas.</div>
           </div>
-          <div class="preset-card-option" id="optPreset1080p" data-preset="1080p">
+          <div class="preset-card-option" id="optPreset1080p" data-preset="1080p" data-fps="30">
             <div class="preset-card-title">1080p @ 30 FPS</div>
             <div class="preset-card-sub">Alta definición nítida. Mayor claridad para texto y detalles.</div>
+          </div>
+          <div class="preset-card-option" id="optPreset720p60" data-preset="720p" data-fps="60">
+            <div class="preset-card-title">720p @ 60 FPS</div>
+            <div class="preset-card-sub">Movimiento fluido. Ideal para shooters y juegos rápidos.</div>
+          </div>
+          <div class="preset-card-option" id="optPreset1080p60" data-preset="1080p" data-fps="60">
+            <div class="preset-card-title">1080p @ 60 FPS</div>
+            <div class="preset-card-sub">Máxima calidad y fluidez. Requiere buena subida de internet.</div>
           </div>
         </div>
 
@@ -440,9 +448,13 @@
 
           <div class="setting-group">
             <label class="setting-label">Prueba de Micrófono</label>
-            <span class="setting-desc">Habla para verificar que el nivel de audio responda.</span>
+            <span class="setting-desc">Habla para verificar que el nivel de audio responda. Usa "Probar Voz" para escucharte con los ajustes actuales (mejor con audífonos).</span>
             <div class="volume-meter-wrap">
               <div class="volume-meter-bar" id="micVolumeBar"></div>
+            </div>
+            <div class="voice-test-row">
+              <button type="button" class="btn btn-secondary btn-sm" id="btnVoiceTest"><span id="btnVoiceTestText">Probar Voz (Escucharme)</span></button>
+              <span class="voice-test-status" id="voiceTestStatusText">Inactivo</span>
             </div>
           </div>
 

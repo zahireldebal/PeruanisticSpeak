@@ -1430,6 +1430,25 @@ body {
   color: var(--text-muted);
 }
 
+/* Voice test ("Probar Voz") */
+.voice-test-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.voice-test-status {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.voice-test-status.active {
+  color: var(--success-color);
+  font-weight: 600;
+}
+
 /* Screen Sources Picker */
 .screen-picker-grid {
   display: grid;

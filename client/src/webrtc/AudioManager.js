@@ -38,6 +38,12 @@ class AudioManager {
     }, savedProcessing || {});
 
     this.selectedDeviceId = null;
+
+    // Voice test ("Escucharme"): plays your own processed mic back locally
+    this.isVoiceTesting = false;
+    this.voiceTestTrack = null;
+    this.voiceTestElement = null;
+
     this.listeners = new Map();
   }
 
@@ -103,6 +109,12 @@ class AudioManager {
 
       this.setupAudioAnalysis();
       this.applyInputMode();
+
+      // Keep an active voice test running on the newly selected microphone
+      if (this.isVoiceTesting) {
+        this.stopVoiceTest();
+        this.startVoiceTest();
+      }
 
       console.log('[AudioManager] Microphone initialized successfully. DeviceId:', deviceId || 'default');
       this.emit('ready', this.localStream);
@@ -289,6 +301,62 @@ class AudioManager {
     }
   }
 
+  /**
+   * Voice test: hear your own microphone (with the current noise suppression / echo
+   * cancellation / gain settings). Uses a clone of the mic track so it works even while
+   * muted or in PTT mode, without changing what peers receive.
+   */
+  startVoiceTest() {
+    if (this.isVoiceTesting) return true;
+    if (!this.audioTrack || this.audioTrack.readyState === 'ended') {
+      console.warn('[AudioManager] Voice test unavailable: microphone not initialized');
+      return false;
+    }
+    try {
+      this.voiceTestTrack = this.audioTrack.clone();
+      this.voiceTestTrack.enabled = true;
+      const el = new Audio();
+      el.autoplay = true;
+      el.srcObject = new MediaStream([this.voiceTestTrack]);
+      const playing = el.play();
+      if (playing && playing.catch) {
+        playing.catch(e => console.warn('[AudioManager] Voice test play note:', e));
+      }
+      this.voiceTestElement = el;
+      this.isVoiceTesting = true;
+      this.emit('voice-test-change', true);
+      return true;
+    } catch (err) {
+      console.warn('[AudioManager] Failed to start voice test:', err);
+      this.stopVoiceTest();
+      return false;
+    }
+  }
+
+  stopVoiceTest() {
+    const wasTesting = this.isVoiceTesting;
+    if (this.voiceTestElement) {
+      try { this.voiceTestElement.pause(); } catch (_) {}
+      this.voiceTestElement.srcObject = null;
+      this.voiceTestElement = null;
+    }
+    if (this.voiceTestTrack) {
+      this.voiceTestTrack.stop();
+      this.voiceTestTrack = null;
+    }
+    this.isVoiceTesting = false;
+    if (wasTesting) this.emit('voice-test-change', false);
+  }
+
+  toggleVoiceTest() {
+    if (this.isVoiceTesting) {
+      this.stopVoiceTest();
+    } else {
+      this.startVoiceTest();
+    }
+    return this.isVoiceTesting;
+  }
+
   async getDevices() {
     try {
       const devices = await navigator.mediaDevices.enumerateDevices();
@@ -303,6 +371,7 @@ class AudioManager {
   }
 
   destroy() {
+    this.stopVoiceTest();
     if (this.animationFrame) cancelAnimationFrame(this.animationFrame);
     if (this.speakingDebounceTimeout) clearTimeout(this.speakingDebounceTimeout);
     if (this.audioTrack) {
