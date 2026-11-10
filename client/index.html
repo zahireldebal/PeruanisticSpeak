@@ -472,8 +472,8 @@
 
             <div class="toggle-switch-row">
               <div class="toggle-switch-meta">
-                <span class="setting-label">Supresión de Ruido</span>
-                <span class="setting-desc">Filtra ruidos de fondo como teclados mecánicos o ventiladores.</span>
+                <span class="setting-label">Supresión de Ruido (IA)</span>
+                <span class="setting-desc">RNNoise: elimina teclado, ventiladores, ruido de calle y respiración. Estado: <strong id="noiseSuppressionStatus">—</strong></span>
               </div>
               <label class="toggle-switch">
                 <input type="checkbox" id="toggleNoiseSuppression" checked>
@@ -484,7 +484,7 @@
             <div class="toggle-switch-row">
               <div class="toggle-switch-meta">
                 <span class="setting-label">Cancelación de Eco</span>
-                <span class="setting-desc">Evita que el sonido de tus altavoces regrese al micrófono.</span>
+                <span class="setting-desc">Evita que el sonido de tus altavoces regrese al micrófono. Desactívala si usas audífonos y notas tu voz cortada.</span>
               </div>
               <label class="toggle-switch">
                 <input type="checkbox" id="toggleEchoCancellation" checked>
@@ -613,6 +613,7 @@
   <!-- Scripts -->
   <script src="src/webrtc/SoundEffects.js"></script>
   <script src="src/webrtc/SignalingClient.js"></script>
+  <script src="vendor/rnnoise/rnnoiseWasm.js"></script>
   <script src="src/webrtc/AudioManager.js"></script>
   <script src="src/webrtc/ScreenShareManager.js"></script>
   <script src="src/webrtc/PeerManager.js"></script>

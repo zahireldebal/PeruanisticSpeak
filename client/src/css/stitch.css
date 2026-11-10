@@ -411,6 +411,16 @@ body {
   letter-spacing: 0.5px;
 }
 
+button.watch-stream-btn {
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+button.watch-stream-btn:hover {
+  background-color: var(--danger-hover);
+}
+
 /* -------------------------------------------------------------
    Bottom User Panel (Deck - 60px)
    ------------------------------------------------------------- */
@@ -1428,6 +1438,84 @@ body {
 .preset-card-sub {
   font-size: 11px;
   color: var(--text-muted);
+}
+
+/* Per-user volume popover */
+.user-volume-popover {
+  position: fixed;
+  z-index: 2000;
+  width: 240px;
+  background-color: var(--bg-modal);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  box-shadow: var(--shadow-lg);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.user-volume-title {
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.user-volume-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary);
+}
+
+.user-volume-value {
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.user-volume-range {
+  width: 100%;
+  accent-color: var(--brand-color);
+  cursor: pointer;
+}
+
+.user-volume-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.participant-card.remote,
+.participant-item.remote {
+  cursor: pointer;
+}
+
+.volume-tag {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Unread text channel */
+.channel-item.has-unread .channel-item-left span:last-child {
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.channel-item.has-unread::after {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--text-primary);
+  margin-left: auto;
+  flex-shrink: 0;
 }
 
 /* Voice test ("Probar Voz") */

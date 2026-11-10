@@ -252,6 +252,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     renderMembersList();
   });
 
+  // Chat history kept by the server (text channels are server-wide)
+  signaling.on('chat-history', (channels) => {
+    for (const [channelId, messages] of Object.entries(channels || {})) {
+      mergeChatHistory(channelId, messages);
+    }
+    loadChannelChatHistory(state.activeTextChannel);
+  });
+
   // Sound cues on join / leave (Feature 7)
   signaling.on('user-joined', () => {
     sounds.playJoin();
@@ -337,8 +345,30 @@ document.addEventListener('DOMContentLoaded', async () => {
   peers.on('remote-screen-removed', (peerId) => {
     if (state.activeScreenOwner === peerId) {
       clearScreenStream();
+      // Another friend is still streaming? Switch to it automatically.
+      for (const [otherId, otherStream] of peers.remoteScreenStreams.entries()) {
+        if (otherId !== peerId) {
+          watchRemoteScreen(otherId, otherStream);
+          break;
+        }
+      }
     }
   });
+
+  function watchRemoteScreen(peerId, stream) {
+    const peer = peers.peerStates.get(peerId);
+    displayScreenStream(stream, peer ? peer.username : 'Amigo', describeRemoteStream(stream), false, peerId);
+  }
+
+  // "VER" on a LIVE user: show their stream, or ask them to resend it if it never arrived
+  function watchPeerStream(peerId) {
+    const stream = peers.remoteScreenStreams.get(peerId);
+    if (stream) {
+      watchRemoteScreen(peerId, stream);
+    } else {
+      signaling.sendRequestRenegotiate(peerId);
+    }
+  }
 
   // Feature 8: Screen Viewers
   peers.on('viewers-changed', (viewersList) => {
@@ -362,6 +392,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     el.emptyScreenState.style.display = 'none';
     el.screenVideoElement.style.display = 'block';
     el.screenVideoElement.muted = !!isLocal || audio.isDeafened;
+    el.screenVideoElement.volume = isLocal ? 1 : getStreamVolume(ownerId) / 100;
     el.screenVideoElement.srcObject = stream;
     el.screenVideoElement.play().catch(e => console.warn(e));
 
@@ -403,18 +434,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Participant & Channel Rendering
   // -------------------------------------------------------------
   function renderParticipants() {
+    // The sidebar always shows who is in each voice channel (server-wide presence),
+    // even when we are not connected to voice ourselves.
+    renderSidebarChannelsFromState();
+
     if (!state.isConnectedToVoice || !state.currentRoom) {
-      el.voiceUserCountBadge.textContent = '0';
-      el.participantsVoz1.innerHTML = '';
-      el.participantsVoz2.innerHTML = '';
-      el.participantsVozAfk.innerHTML = '';
       el.participantsGrid.innerHTML = '';
       return;
     }
 
     const activePeers = Array.from(peers.peerStates.values());
-    const totalCount = activePeers.length + 1;
-    el.voiceUserCountBadge.textContent = totalCount;
 
     // Render active voice channel cards grid
     el.participantsGrid.innerHTML = '';
@@ -431,13 +460,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
     el.participantsGrid.appendChild(localCard);
 
-    // Remote peers cards
+    // Remote peers cards (click / right-click: volume)
     activePeers.forEach(peer => {
       const card = createParticipantCard(peer);
+      attachVolumeMenu(card, peer.peerId);
       el.participantsGrid.appendChild(card);
     });
-
-    renderSidebarChannelsFromState();
   }
 
   function createParticipantCard(user) {
@@ -450,8 +478,14 @@ document.addEventListener('DOMContentLoaded', async () => {
       : `<div class="card-avatar">${escapeHtml(user.username.charAt(0).toUpperCase())}</div>`;
 
     let badgesHtml = '';
+    if (user.peerId !== state.peerId && peers.getPeerVolume(user.peerId) !== 100) {
+      badgesHtml += `<span class="volume-tag" title="Volumen personalizado">${peers.getPeerVolume(user.peerId)}%</span>`;
+    }
     if (user.isSharingScreen) {
-      badgesHtml += `<span class="screen-share-tag">EN VIVO</span>`;
+      const isRemote = user.peerId !== state.peerId;
+      badgesHtml += isRemote
+        ? `<button type="button" class="screen-share-tag watch-stream-btn" data-watch-peer="${escapeHtml(user.peerId)}" title="Ver transmisión">EN VIVO · VER</button>`
+        : `<span class="screen-share-tag">EN VIVO</span>`;
     }
     if (user.isMuted) {
       badgesHtml += `<span title="Silenciado" style="color:var(--danger-color); font-size:12px;">🔇</span>`;
@@ -465,6 +499,13 @@ document.addEventListener('DOMContentLoaded', async () => {
       <div class="card-name">${escapeHtml(user.username)}</div>
       <div class="card-badges">${badgesHtml}</div>
     `;
+    const watchBtn = card.querySelector('[data-watch-peer]');
+    if (watchBtn) {
+      watchBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        watchPeerStream(user.peerId);
+      });
+    }
     return card;
   }
 
@@ -494,21 +535,29 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     // Add peers from serverRoomsState
+    let voiceTotal = state.isConnectedToVoice && state.currentRoom ? 1 : 0;
     for (const [roomId, users] of Object.entries(state.serverRoomsState)) {
       const container = channelContainers[roomId];
       if (!container || !Array.isArray(users)) continue;
 
       users.forEach(u => {
         if (u.peerId === state.peerId) return; // already added above
+        voiceTotal++;
         const item = createSidebarParticipantItem(u);
+        // Volume can be adjusted for people in our own voice channel
+        if (state.isConnectedToVoice && roomId === state.currentRoom) {
+          attachVolumeMenu(item, u.peerId);
+        }
         container.appendChild(item);
       });
     }
+    el.voiceUserCountBadge.textContent = voiceTotal;
   }
 
   function createSidebarParticipantItem(user) {
     const item = document.createElement('div');
     item.className = 'participant-item';
+    item.dataset.peerId = user.peerId;
 
     const avatarHtml = user.avatar
       ? `<div class="avatar-small ${user.isSpeaking ? 'speaking' : ''}"><img src="${user.avatar}" alt=""></div>`
@@ -580,6 +629,111 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
+  // -------------------------------------------------------------
+  // Per-user volume (0-100%) — click or right-click a user in your voice channel
+  // -------------------------------------------------------------
+  const streamVolumes = (() => {
+    try { return JSON.parse(localStorage.getItem('ps_stream_volumes') || '{}'); } catch (_) { return {}; }
+  })();
+
+  function getStreamVolume(peerId) {
+    return typeof streamVolumes[peerId] === 'number' ? streamVolumes[peerId] : 100;
+  }
+
+  function setStreamVolume(peerId, value) {
+    streamVolumes[peerId] = value;
+    try { localStorage.setItem('ps_stream_volumes', JSON.stringify(streamVolumes)); } catch (_) {}
+    if (state.activeScreenOwner === peerId) el.screenVideoElement.volume = value / 100;
+  }
+
+  let volumePopover = null;
+
+  function closeVolumePopover() {
+    if (volumePopover) {
+      volumePopover.remove();
+      volumePopover = null;
+      renderParticipants();
+    }
+  }
+
+  function attachVolumeMenu(element, peerId) {
+    element.classList.add('remote');
+    element.title = 'Clic para ajustar el volumen';
+    const open = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openVolumePopover(peerId, e.clientX, e.clientY);
+    };
+    element.addEventListener('click', open);
+    element.addEventListener('contextmenu', open);
+  }
+
+  function volumeSliderHtml(id, label, value) {
+    return `
+      <label class="user-volume-label" for="${id}">
+        <span>${label}</span><span class="user-volume-value" id="${id}Value">${value}%</span>
+      </label>
+      <input type="range" class="user-volume-range" id="${id}" min="0" max="100" step="1" value="${value}">
+    `;
+  }
+
+  function openVolumePopover(peerId, x, y) {
+    if (volumePopover) { volumePopover.remove(); volumePopover = null; }
+    const peer = peers.peerStates.get(peerId);
+    if (!peer) return;
+    const watchingTheirStream = state.activeScreenOwner === peerId;
+
+    const pop = document.createElement('div');
+    pop.className = 'user-volume-popover';
+    pop.innerHTML = `
+      <div class="user-volume-title">${escapeHtml(peer.username)}</div>
+      ${volumeSliderHtml('userVoiceVolume', 'Volumen de voz', peers.getPeerVolume(peerId))}
+      ${watchingTheirStream ? volumeSliderHtml('userStreamVolume', 'Volumen de la transmisión', getStreamVolume(peerId)) : ''}
+      <div class="user-volume-actions">
+        <button type="button" class="btn btn-secondary btn-sm" id="btnResetUserVolume">Restablecer</button>
+      </div>
+    `;
+    pop.addEventListener('click', e => e.stopPropagation());
+    pop.addEventListener('contextmenu', e => e.stopPropagation());
+    document.body.appendChild(pop);
+    volumePopover = pop;
+
+    // Keep the popover inside the window
+    const rect = pop.getBoundingClientRect();
+    pop.style.left = `${Math.max(8, Math.min(x, window.innerWidth - rect.width - 8))}px`;
+    pop.style.top = `${Math.max(8, Math.min(y, window.innerHeight - rect.height - 8))}px`;
+
+    const voice = pop.querySelector('#userVoiceVolume');
+    const voiceValue = pop.querySelector('#userVoiceVolumeValue');
+    voice.addEventListener('input', () => {
+      voiceValue.textContent = `${voice.value}%`;
+      peers.setPeerVolume(peerId, voice.value);
+    });
+
+    const stream = pop.querySelector('#userStreamVolume');
+    if (stream) {
+      const streamValue = pop.querySelector('#userStreamVolumeValue');
+      stream.addEventListener('input', () => {
+        streamValue.textContent = `${stream.value}%`;
+        setStreamVolume(peerId, Number(stream.value));
+      });
+    }
+
+    pop.querySelector('#btnResetUserVolume').addEventListener('click', () => {
+      voice.value = 100;
+      voice.dispatchEvent(new Event('input'));
+      if (stream) {
+        stream.value = 100;
+        stream.dispatchEvent(new Event('input'));
+      }
+    });
+    voice.focus();
+  }
+
+  document.addEventListener('click', () => closeVolumePopover());
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeVolumePopover(); });
+  window.addEventListener('blur', () => closeVolumePopover());
+
   function updateParticipantCardSpeaking(peerId, isSpeaking) {
     const card = document.getElementById(`card-peer-${peerId}`);
     if (card) {
@@ -634,6 +788,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       item.classList.add('active');
 
       state.activeTextChannel = textCh;
+      setTextChannelUnread(textCh, false);
       el.chatInput.placeholder = `Enviar mensaje a #${textCh}...`;
       loadChannelChatHistory(textCh);
     });
@@ -833,7 +988,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     const text = el.chatInput.value.trim();
     if (!text && !state.attachedImage) return;
 
-    signaling.sendChatMessage(text, state.attachedImage, state.activeTextChannel);
+    signaling.sendChatMessage(text, state.attachedImage, state.activeTextChannel, {
+      peerId: state.peerId,
+      username: state.username,
+      avatar: state.avatar
+    });
 
     el.chatInput.value = '';
     state.attachedImage = null;
@@ -850,14 +1009,26 @@ document.addEventListener('DOMContentLoaded', async () => {
       sounds.playChatMessage();
     }
 
-    // Save to channel history
-    saveChatMessageToStorage(targetRoom, msg);
+    // Save to channel history (skip duplicates)
+    if (!saveChatMessageToStorage(targetRoom, msg)) return;
 
-    // If currently viewing this channel, append immediately
+    // If currently viewing this channel, append immediately; otherwise mark it unread
     if (targetRoom === state.activeTextChannel) {
       appendChatMessageUI(msg);
+    } else {
+      setTextChannelUnread(targetRoom, true);
     }
   });
+
+  function setTextChannelUnread(channelId, unread) {
+    el.textChannelItems.forEach(item => {
+      if (item.dataset.textChannel === channelId) item.classList.toggle('has-unread', unread);
+    });
+  }
+
+  function chatMessageKey(msg) {
+    return msg.id || `${msg.timestamp}|${msg.senderPeerId}|${msg.text}`;
+  }
 
   function appendChatMessageUI(msg) {
     const row = document.createElement('div');
@@ -888,14 +1059,37 @@ document.addEventListener('DOMContentLoaded', async () => {
     el.chatMessages.scrollTop = el.chatMessages.scrollHeight;
   }
 
+  // Returns false if the message was already stored
   function saveChatMessageToStorage(roomId, msg) {
     try {
       const key = `ps_chat_${roomId}`;
       const history = JSON.parse(localStorage.getItem(key) || '[]');
+      const msgKey = chatMessageKey(msg);
+      if (history.some(m => chatMessageKey(m) === msgKey)) return false;
       history.push(msg);
       // Keep last 100 messages
-      if (history.length > 100) history.shift();
+      while (history.length > 100) history.shift();
       localStorage.setItem(key, JSON.stringify(history));
+    } catch (_) {}
+    return true;
+  }
+
+  // Union of local history and the server's recent messages, ordered by time
+  function mergeChatHistory(roomId, serverMessages) {
+    if (!Array.isArray(serverMessages) || serverMessages.length === 0) return;
+    try {
+      const key = `ps_chat_${roomId}`;
+      const local = JSON.parse(localStorage.getItem(key) || '[]');
+      const byKey = new Map(local.map(m => [chatMessageKey(m), m]));
+      let added = 0;
+      serverMessages.forEach(m => {
+        const k = chatMessageKey(m);
+        if (!byKey.has(k)) { byKey.set(k, m); added++; }
+      });
+      if (added === 0) return;
+      const merged = Array.from(byKey.values()).sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0)).slice(-100);
+      localStorage.setItem(key, JSON.stringify(merged));
+      if (roomId !== state.activeTextChannel) setTextChannelUnread(roomId, true);
     } catch (_) {}
   }
 
@@ -1138,17 +1332,43 @@ document.addEventListener('DOMContentLoaded', async () => {
     closeSettings();
   }
 
-  // Live Audio Processing Toggles (Feature 1)
+  // Audio Processing Toggles: each change re-opens the mic with the new settings
+  // (Chromium ignores processing changes on a live track).
+  const NOISE_MODE_LABELS = {
+    rnnoise: 'IA activa (RNNoise)',
+    browser: 'Básica (navegador)',
+    off: 'Desactivada'
+  };
+
+  function updateNoiseSuppressionStatus(text) {
+    const status = document.getElementById('noiseSuppressionStatus');
+    if (status) status.textContent = text || NOISE_MODE_LABELS[audio.noiseSuppressionMode] || '—';
+  }
+
+  audio.on('ready', () => updateNoiseSuppressionStatus());
+
+  async function applyAudioProcessing(settings) {
+    const toggles = [el.toggleNoiseSuppression, el.toggleEchoCancellation, el.toggleAutoGain];
+    toggles.forEach(t => { t.disabled = true; });
+    updateNoiseSuppressionStatus('Aplicando...');
+    try {
+      await audio.setAudioProcessing(settings);
+    } finally {
+      toggles.forEach(t => { t.disabled = false; });
+      updateNoiseSuppressionStatus();
+    }
+  }
+
   el.toggleNoiseSuppression.addEventListener('change', (e) => {
-    audio.setAudioProcessing({ noiseSuppression: e.target.checked });
+    applyAudioProcessing({ noiseSuppression: e.target.checked });
   });
 
   el.toggleEchoCancellation.addEventListener('change', (e) => {
-    audio.setAudioProcessing({ echoCancellation: e.target.checked });
+    applyAudioProcessing({ echoCancellation: e.target.checked });
   });
 
   el.toggleAutoGain.addEventListener('change', (e) => {
-    audio.setAudioProcessing({ autoGainControl: e.target.checked });
+    applyAudioProcessing({ autoGainControl: e.target.checked });
   });
 
   // Settings Tabs Switcher

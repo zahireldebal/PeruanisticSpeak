@@ -200,6 +200,29 @@ async function runClientTests() {
   pcC3.connectionState = 'failed';
   pcC3.onconnectionstatechange();
   assert(pcC3.iceRestarted === 1, 'Failed connection triggers an ICE restart');
+
+  // Per-user volume
+  assert(pm.getPeerVolume('peer_c') === 100, 'Default user volume is 100%');
+  pm.setPeerVolume('peer_c', 40);
+  assert(Math.abs(pm.remoteAudioElements.get('peer_c').volume - 0.4) < 1e-9, 'setPeerVolume(40) sets the voice element volume to 0.4');
+  assert(pm.setPeerVolume('peer_c', 250) === 100 && pm.setPeerVolume('peer_c', -5) === 0, 'User volume is clamped to 0-100');
+  pm.setPeerVolume('peer_c', 100);
+
+  // Fresh connection to a newcomer waits for their offer (no initial glare)
+  sent.length = 0;
+  sig.handleMessage({ type: 'user-joined', peerId: 'peer_d', username: 'D' });
+  const pcD = pm.peerConnections.get('peer_d');
+  await pcD.onnegotiationneeded();
+  assert(!sent.some(m => m.type === 'offer' && m.targetPeerId === 'peer_d'), 'Existing member does not offer to a newcomer before the newcomer offers');
+  await pm.handleOffer('peer_d', { type: 'offer', sdp: 'newcomer-offer' });
+  await new Promise(r => setTimeout(r, 0));
+  const toD = sent.filter(m => m.targetPeerId === 'peer_d').map(m => m.type).join(',');
+  assert(toD === 'answer,offer', `After answering the newcomer, the held negotiation is sent (${toD})`);
+
+  sent.length = 0;
+  sig.handleMessage({ type: 'room-users', roomId: 'voz-1', peers: [{ peerId: 'peer_e', username: 'E' }] });
+  await pm.peerConnections.get('peer_e').onnegotiationneeded();
+  assert(sent.some(m => m.type === 'offer' && m.targetPeerId === 'peer_e'), 'Newcomer offers immediately to existing members');
   pm.destroy();
 
   // 4. SoundEffects methods
