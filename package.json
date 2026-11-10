@@ -5,9 +5,10 @@
   "main": "electron/main.js",
   "type": "commonjs",
   "scripts": {
-    "start": "electron .",
-    "electron:dev": "electron .",
+    "start": "node server/src/signaling.js",
     "server": "node server/src/signaling.js",
+    "desktop": "electron electron/main.js",
+    "electron:dev": "electron electron/main.js",
     "test:server": "node server/tests/signaling.test.js",
     "test:client": "node client/tests/webrtc.test.js",
     "test": "node server/tests/signaling.test.js && node client/tests/webrtc.test.js",
