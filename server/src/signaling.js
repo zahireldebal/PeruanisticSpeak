@@ -19,9 +19,15 @@ class SignalingServer {
   start() {
     return new Promise((resolve) => {
       this.server = http.createServer((req, res) => {
-        if (req.url === '/health') {
+        if (req.url === '/health' || req.url === '/') {
           res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ status: 'ok', rooms: this.rooms.size, clients: this.peers.size }));
+          res.end(JSON.stringify({
+            status: 'online',
+            service: 'PeruanisticSPEAK Signaling Server',
+            version: '1.0.0',
+            activeRooms: this.rooms.size,
+            connectedClients: this.peers.size
+          }));
           return;
         }
         res.writeHead(404);

@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: peruanisticspeak-server
+    runtime: node
+    plan: free
+    region: oregon
+    buildCommand: npm install
+    startCommand: node server/src/signaling.js
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
