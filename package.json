@@ -1,6 +1,6 @@
 {
   "name": "peruanisticspeak",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Ultra-lightweight gaming voice, screen-sharing and chat client",
   "main": "electron/main.js",
   "type": "commonjs",
@@ -38,7 +38,7 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "PeruanisticSPEAK",
-      "uninstallDisplayName": "PeruanisticSPEAK 1.0",
+      "uninstallDisplayName": "PeruanisticSPEAK",
       "artifactName": "${productName} Setup ${version}.${ext}",
       "installerIcon": "client/public/icon.ico",
       "uninstallerIcon": "client/public/icon.ico",

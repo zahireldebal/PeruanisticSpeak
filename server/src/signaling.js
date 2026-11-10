@@ -25,7 +25,7 @@ class SignalingServer {
           res.end(JSON.stringify({
             status: 'ok',
             service: 'PeruanisticSPEAK Signaling Server',
-            version: '1.0.0',
+            version: '1.0.1',
             activeRooms: this.rooms.size,
             connectedClients: this.peers.size
           }));

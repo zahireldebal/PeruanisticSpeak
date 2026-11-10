@@ -5,7 +5,7 @@
  */
 
 document.addEventListener('DOMContentLoaded', async () => {
-  console.log('[App] Initializing PeruanisticSPEAK v1.0...');
+  console.log('[App] Initializing PeruanisticSPEAK v1.0.1...');
 
   const EMOJIS = [
     '😀', '😂', '🤣', '😎', '🔥', '💀', '🎮',
