@@ -8,13 +8,32 @@ class SignalingClient {
     this.ws = null;
     this.listeners = new Map();
     this.reconnectAttempts = 0;
-    this.maxReconnectAttempts = 10;
     this.reconnectTimeout = null;
+    this.manualClose = false;
     this.isConnected = false;
     this.currentRoom = null;
     this.peerId = null;
     this.username = 'Gamer';
     this.avatar = null;
+    // Identifies this app run: lets the server resume our seat after a short socket drop
+    this.sessionId = Math.random().toString(36).slice(2) + Date.now().toString(36);
+
+    // Latency probe (application-level ping, shown in the UI)
+    this.pingInterval = null;
+    this.pendingPingAt = null;
+    this.lastRtt = null;
+    this.serverAnswersPing = false; // older servers ignore 'ping': never treat that as a dead socket
+
+    // Reconnect immediately when the OS reports the network is back
+    if (typeof window !== 'undefined' && window.addEventListener) {
+      window.addEventListener('online', () => {
+        if (!this.isConnected && !this.manualClose) {
+          this.reconnectAttempts = 0;
+          clearTimeout(this.reconnectTimeout);
+          this.connect();
+        }
+      });
+    }
   }
 
   on(event, callback) {
@@ -44,7 +63,18 @@ class SignalingClient {
   }
 
   connect(url) {
-    if (url) this.url = url;
+    this.manualClose = false;
+    if (url && url !== this.url) {
+      // Server changed: drop the old socket and connect to the new one
+      this.url = url;
+      if (this.ws) {
+        const old = this.ws;
+        this.ws = null;
+        old.onclose = null;
+        try { old.close(); } catch (_) {}
+        this.handleSocketClosed();
+      }
+    }
     if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
       return;
     }
@@ -56,12 +86,15 @@ class SignalingClient {
         this.isConnected = true;
         this.reconnectAttempts = 0;
         console.log('[SignalingClient] Connected to server at', this.url);
-        this.emit('connected');
+        this.startPing();
 
-        // Rejoin room if we reconnected
-        if (this.currentRoom && this.peerId) {
+        // Rejoin room if we reconnected (the only place that re-joins: joining twice made the
+        // server announce us as leaving/joining twice and reset everyone's connections)
+        const isRejoin = !!(this.currentRoom && this.peerId);
+        if (isRejoin) {
           this.joinRoom(this.currentRoom, this.peerId, this.username, this.avatar);
         }
+        this.emit('connected', { rejoined: isRejoin });
       };
 
       this.ws.onmessage = (event) => {
@@ -74,9 +107,8 @@ class SignalingClient {
       };
 
       this.ws.onclose = () => {
-        this.isConnected = false;
-        this.emit('disconnected');
-        this.scheduleReconnect();
+        this.handleSocketClosed();
+        if (!this.manualClose) this.scheduleReconnect();
       };
 
       this.ws.onerror = (err) => {
@@ -89,11 +121,16 @@ class SignalingClient {
     }
   }
 
+  handleSocketClosed() {
+    const wasConnected = this.isConnected;
+    this.isConnected = false;
+    this.stopPing();
+    if (wasConnected || this.reconnectAttempts === 0) this.emit('disconnected');
+    this.emit('ping', null);
+  }
+
+  // Keeps retrying forever (Render free instances can take ~1 min to wake up)
   scheduleReconnect() {
-    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.warn('[SignalingClient] Max reconnect attempts reached.');
-      return;
-    }
     const delay = Math.min(1000 * Math.pow(1.5, this.reconnectAttempts), 10000);
     this.reconnectAttempts++;
     clearTimeout(this.reconnectTimeout);
@@ -119,9 +156,61 @@ class SignalingClient {
       type: 'join',
       roomId,
       peerId,
+      sessionId: this.sessionId,
       username: this.username,
       avatar: this.avatar
     });
+  }
+
+  // ---------------------------------------------------------------
+  // Latency: ping every PING_INTERVAL_MS; emits 'ping' with ms, or with the time already
+  // waited (> PING_TIMEOUT_MS) while a reply is overdue, or null when disconnected.
+  // ---------------------------------------------------------------
+  startPing() {
+    this.stopPing();
+    const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+    const tick = () => {
+      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+      if (this.pendingPingAt !== null) {
+        if (!this.serverAnswersPing) {
+          // Server never answered a ping (older version): just retry, no timeout logic
+          this.pendingPingAt = null;
+          return;
+        }
+        const waited = now() - this.pendingPingAt;
+        if (waited > SignalingClient.PING_TIMEOUT_MS) {
+          this.emit('ping', Math.round(waited), true);
+        }
+        if (waited < SignalingClient.STALE_SOCKET_MS) return;
+        // No reply for a long time: the socket is dead even if it was never closed
+        console.warn('[SignalingClient] Server not answering, reconnecting...');
+        this.pendingPingAt = null;
+        const dead = this.ws;
+        try { dead.close(); } catch (_) {}
+        if (dead.onclose) dead.onclose();
+        dead.onclose = null;
+        return;
+      }
+      this.pendingPingAt = now();
+      this.send({ type: 'ping', t: this.pendingPingAt });
+    };
+    tick();
+    this.pingInterval = setInterval(tick, SignalingClient.PING_INTERVAL_MS);
+  }
+
+  stopPing() {
+    clearInterval(this.pingInterval);
+    this.pingInterval = null;
+    this.pendingPingAt = null;
+  }
+
+  handlePong(message) {
+    if (this.pendingPingAt === null || message.t !== this.pendingPingAt) return;
+    const now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+    this.lastRtt = Math.round(now - this.pendingPingAt);
+    this.pendingPingAt = null;
+    this.serverAnswersPing = true;
+    this.emit('ping', this.lastRtt, false);
   }
 
   sendOffer(targetPeerId, sdp) {
@@ -209,7 +298,13 @@ class SignalingClient {
         this.emit('server-state', message.rooms);
         break;
       case 'room-users':
-        this.emit('room-users', message.peers, message.roomId);
+        this.emit('room-users', message.peers, message.roomId, !!message.resumed);
+        break;
+      case 'pong':
+        this.handlePong(message);
+        break;
+      case 'ice-config':
+        this.emit('ice-config', message.iceServers || []);
         break;
       case 'user-joined':
         this.emit('user-joined', message);
@@ -253,7 +348,9 @@ class SignalingClient {
   }
 
   disconnect() {
+    this.manualClose = true;
     clearTimeout(this.reconnectTimeout);
+    this.stopPing();
     if (this.ws) {
       this.ws.close();
       this.ws = null;
@@ -261,6 +358,10 @@ class SignalingClient {
     this.isConnected = false;
   }
 }
+
+SignalingClient.PING_INTERVAL_MS = 2000;
+SignalingClient.PING_TIMEOUT_MS = 5000;
+SignalingClient.STALE_SOCKET_MS = 15000;
 
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = SignalingClient;

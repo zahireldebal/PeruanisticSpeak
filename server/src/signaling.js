@@ -12,6 +12,7 @@ class SignalingServer {
     this.rooms = new Map(); // roomId -> Map(peerId -> { ws, username, avatar, isSharingScreen, isMuted, isDeafened, isSpeaking })
     this.peers = new Map(); // ws -> { peerId, username, avatar, roomId, isAlive }
     this.chatHistory = new Map(); // textChannelId -> [messages] (last CHAT_HISTORY_LIMIT)
+    this.iceConfigCache = null; // { iceServers, expiresAt }
     this.server = null;
     this.wss = null;
     this.heartbeatInterval = null;
@@ -25,7 +26,7 @@ class SignalingServer {
           res.end(JSON.stringify({
             status: 'ok',
             service: 'PeruanisticSPEAK Signaling Server',
-            version: '1.0.2',
+            version: '1.0.3',
             activeRooms: this.rooms.size,
             connectedClients: this.peers.size
           }));
@@ -61,6 +62,11 @@ class SignalingServer {
         this.send(ws, {
           type: 'chat-history',
           channels: Object.fromEntries(this.chatHistory)
+        });
+
+        // STUN/TURN servers for WebRTC (TURN lets mobile-data / CGNAT users connect)
+        this.getIceServers().then((iceServers) => {
+          if (iceServers.length > 0) this.send(ws, { type: 'ice-config', iceServers });
         });
 
         ws.on('pong', () => {
@@ -141,9 +147,16 @@ class SignalingServer {
     if (!peerState) return;
 
     switch (message.type) {
+      case 'ping': {
+        // Application-level latency probe (shown as "ms" in the client)
+        this.send(ws, { type: 'pong', t: message.t });
+        break;
+      }
+
       case 'join': {
         const { roomId, peerId, username, avatar } = message;
         if (!roomId || !peerId) return;
+        const sessionId = message.sessionId ? String(message.sessionId).slice(0, 64) : null;
 
         const requestedNick = (username || `Gamer_${peerId.slice(0, 4)}`).trim();
 
@@ -170,12 +183,47 @@ class SignalingServer {
         peerState.username = requestedNick;
         peerState.avatar = avatar || null;
         peerState.roomId = roomId;
+        peerState.sessionId = sessionId;
 
         if (!this.rooms.has(roomId)) {
           this.rooms.set(roomId, new Map());
         }
 
         const room = this.rooms.get(roomId);
+
+        // Resume: same app session reconnecting after its socket dropped (Wi-Fi blip, Render
+        // proxy timeout). Swap the socket silently so nobody's call is torn down.
+        const existing = room.get(peerId);
+        if (existing && sessionId && existing.sessionId === sessionId && existing.ws !== ws) {
+          clearTimeout(existing.pendingLeave);
+          existing.pendingLeave = null;
+          if (existing.ws && this.peers.has(existing.ws)) {
+            const oldWs = existing.ws;
+            this.peers.delete(oldWs);
+            try { oldWs.terminate(); } catch (_) {}
+          }
+          existing.ws = ws;
+          existing.username = requestedNick;
+          existing.avatar = peerState.avatar;
+          peerState.isSharingScreen = existing.isSharingScreen;
+          peerState.isMuted = existing.isMuted;
+          peerState.isDeafened = existing.isDeafened;
+
+          this.send(ws, {
+            type: 'room-users',
+            roomId,
+            resumed: true,
+            peers: this.getRoomPeers(room, peerId)
+          });
+          this.broadcastServerState();
+          break;
+        }
+        if (existing && existing.ws !== ws) {
+          // Same peerId from a different session (app restarted): treat as a fresh join
+          clearTimeout(existing.pendingLeave);
+          room.delete(peerId);
+          this.broadcastToRoom(roomId, ws, { type: 'user-left', peerId });
+        }
 
         // Notify other room members of the new joiner
         this.broadcastToRoom(roomId, ws, {
@@ -188,6 +236,8 @@ class SignalingServer {
         // Add current peer to the room
         room.set(peerState.peerId, {
           ws,
+          sessionId,
+          pendingLeave: null,
           peerId: peerState.peerId,
           username: peerState.username,
           avatar: peerState.avatar,
@@ -347,6 +397,68 @@ class SignalingServer {
     }
   }
 
+  getRoomPeers(room, exceptPeerId) {
+    const list = [];
+    for (const [id, user] of room.entries()) {
+      if (id === exceptPeerId) continue;
+      list.push({
+        peerId: user.peerId,
+        username: user.username,
+        avatar: user.avatar,
+        isSharingScreen: user.isSharingScreen,
+        isMuted: user.isMuted,
+        isDeafened: user.isDeafened,
+        isSpeaking: user.isSpeaking
+      });
+    }
+    return list;
+  }
+
+  /**
+   * ICE servers handed to clients. Configure ONE of these on the server (e.g. Render env vars):
+   *  - CLOUDFLARE_TURN_KEY_ID + CLOUDFLARE_TURN_API_TOKEN  (Cloudflare Realtime TURN, free tier)
+   *  - TURN_URLS (comma separated) + TURN_USERNAME + TURN_CREDENTIAL  (any TURN provider)
+   *  - ICE_SERVERS_JSON  (raw RTCIceServer[] JSON)
+   */
+  async getIceServers() {
+    const now = Date.now();
+    if (this.iceConfigCache && this.iceConfigCache.expiresAt > now) {
+      return this.iceConfigCache.iceServers;
+    }
+    let iceServers = [];
+    let ttlMs = 60 * 60 * 1000;
+    try {
+      const env = process.env;
+      if (env.ICE_SERVERS_JSON) {
+        iceServers = JSON.parse(env.ICE_SERVERS_JSON);
+      } else if (env.TURN_URLS && env.TURN_USERNAME && env.TURN_CREDENTIAL) {
+        iceServers = [{
+          urls: env.TURN_URLS.split(',').map(u => u.trim()).filter(Boolean),
+          username: env.TURN_USERNAME,
+          credential: env.TURN_CREDENTIAL
+        }];
+      } else if (env.CLOUDFLARE_TURN_KEY_ID && env.CLOUDFLARE_TURN_API_TOKEN && typeof fetch === 'function') {
+        const ttlSeconds = 24 * 60 * 60;
+        const res = await fetch(`https://rtc.live.cloudflare.com/v1/turn/keys/${env.CLOUDFLARE_TURN_KEY_ID}/credentials/generate-ice-servers`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${env.CLOUDFLARE_TURN_API_TOKEN}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ttl: ttlSeconds })
+        });
+        if (!res.ok) throw new Error(`Cloudflare TURN HTTP ${res.status}`);
+        const data = await res.json();
+        const list = data.iceServers;
+        iceServers = Array.isArray(list) ? list : (list ? [list] : []);
+        ttlMs = (ttlSeconds / 2) * 1000; // refresh well before the credentials expire
+      }
+    } catch (err) {
+      console.error('[Signaling] Failed to build ICE server config:', err.message);
+      iceServers = [];
+      ttlMs = 5 * 60 * 1000;
+    }
+    this.iceConfigCache = { iceServers, expiresAt: now + ttlMs };
+    return iceServers;
+  }
+
   updateRoomPeer(peerState) {
     if (!peerState.roomId || !this.rooms.has(peerState.roomId)) return;
     const room = this.rooms.get(peerState.roomId);
@@ -364,7 +476,7 @@ class SignalingServer {
     if (!roomId || !this.rooms.has(roomId)) return;
     const room = this.rooms.get(roomId);
     const target = room.get(targetPeerId);
-    if (target && target.ws.readyState === WebSocket.OPEN) {
+    if (target && target.ws && target.ws.readyState === WebSocket.OPEN) {
       this.send(target.ws, payload);
     }
   }
@@ -373,7 +485,7 @@ class SignalingServer {
     if (!roomId || !this.rooms.has(roomId)) return;
     const room = this.rooms.get(roomId);
     for (const member of room.values()) {
-      if (member.ws !== excludeWs && member.ws.readyState === WebSocket.OPEN) {
+      if (member.ws && member.ws !== excludeWs && member.ws.readyState === WebSocket.OPEN) {
         this.send(member.ws, payload);
       }
     }
@@ -392,6 +504,8 @@ class SignalingServer {
     const roomId = peerState.roomId;
     if (this.rooms.has(roomId)) {
       const room = this.rooms.get(roomId);
+      const member = room.get(peerState.peerId);
+      if (member) clearTimeout(member.pendingLeave);
       room.delete(peerState.peerId);
 
       this.broadcastToRoom(roomId, ws, {
@@ -410,8 +524,34 @@ class SignalingServer {
   }
 
   handleDisconnect(ws) {
-    this.leaveRoom(ws);
+    const peerState = this.peers.get(ws);
+    if (!peerState) return; // already handled (error + close both fire)
     this.peers.delete(ws);
+
+    const room = peerState.roomId && this.rooms.get(peerState.roomId);
+    const member = room && room.get(peerState.peerId);
+    if (member && member.ws === ws && member.sessionId) {
+      // Keep the seat for a short grace period so a quick reconnect resumes the call
+      member.ws = null;
+      const roomId = peerState.roomId;
+      const peerId = peerState.peerId;
+      member.pendingLeave = setTimeout(() => {
+        const currentRoom = this.rooms.get(roomId);
+        const current = currentRoom && currentRoom.get(peerId);
+        if (!current || current.ws) return; // resumed meanwhile
+        currentRoom.delete(peerId);
+        this.broadcastToRoom(roomId, null, { type: 'user-left', peerId });
+        if (currentRoom.size === 0) this.rooms.delete(roomId);
+        this.broadcastServerState();
+      }, SignalingServer.RESUME_GRACE_MS);
+      return;
+    }
+
+    if (peerState.roomId) {
+      this.peers.set(ws, peerState); // leaveRoom looks the state up by socket
+      this.leaveRoom(ws);
+      this.peers.delete(ws);
+    }
     this.broadcastServerState();
   }
 
@@ -423,6 +563,9 @@ class SignalingServer {
     return new Promise((resolve) => {
       if (this.heartbeatInterval) {
         clearInterval(this.heartbeatInterval);
+      }
+      for (const room of this.rooms.values()) {
+        for (const member of room.values()) clearTimeout(member.pendingLeave);
       }
       if (this.wss) {
         this.wss.close();
@@ -437,6 +580,7 @@ class SignalingServer {
 }
 
 SignalingServer.CHAT_HISTORY_LIMIT = 50;
+SignalingServer.RESUME_GRACE_MS = 20000;
 SignalingServer.MAX_CHAT_IMAGE_CHARS = 3 * 1024 * 1024;
 
 // Start standalone if invoked directly

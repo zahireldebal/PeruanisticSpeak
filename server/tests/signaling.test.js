@@ -254,6 +254,71 @@ async function runTests() {
   assert(errC.code === 'nick-taken', 'Server rejects duplicate nickname');
   wsC.close();
 
+  // 12. Ping / pong latency probe
+  const pongP = waitForMsg(wsB, m => m.type === 'pong');
+  wsB.send(JSON.stringify({ type: 'ping', t: 12345.5 }));
+  const pong = await pongP;
+  assert(pong.t === 12345.5, 'Server answers ping with pong echoing the timestamp');
+
+  // 13. Session resume: a quick socket drop does not tear down the call for others
+  SignalingServer.RESUME_GRACE_MS = 400;
+  const openWs = () => new Promise(res => { const w = new WebSocket(`ws://127.0.0.1:${testPort}`); w.on('open', () => res(w)); });
+  const wsR1 = await openWs();
+  const joinedR = waitForMsg(wsB, m => m.type === 'user-joined' && m.peerId === 'peer-r');
+  wsR1.send(JSON.stringify({ type: 'join', roomId: 'voz-1', peerId: 'peer-r', username: 'Resumer', sessionId: 'sess-1' }));
+  await joinedR;
+
+  const leftEvents = [];
+  const leftListener = (msg) => { const m = JSON.parse(msg.toString()); if (m.type === 'user-left' || m.type === 'user-joined') leftEvents.push(m.type + ':' + m.peerId); };
+  wsB.on('message', leftListener);
+  wsR1.terminate();
+  await new Promise(r => setTimeout(r, 100));
+  const wsR2 = await openWs();
+  const resumedP = waitForMsg(wsR2, m => m.type === 'room-users');
+  wsR2.send(JSON.stringify({ type: 'join', roomId: 'voz-1', peerId: 'peer-r', username: 'Resumer', sessionId: 'sess-1' }));
+  const resumed = await resumedP;
+  await new Promise(r => setTimeout(r, 600)); // longer than the grace period
+  assert(resumed.resumed === true && resumed.peers.some(p => p.peerId === 'peer-b'), 'Reconnect within the grace period resumes the session (room-users resumed)');
+  assert(leftEvents.length === 0, `Others see no leave/join on a resumed reconnect (${leftEvents.join(',') || 'none'})`);
+
+  const offerToR = waitForMsg(wsR2, m => m.type === 'offer');
+  wsB.send(JSON.stringify({ type: 'offer', targetPeerId: 'peer-r', sdp: { type: 'offer', sdp: 'x' } }));
+  assert((await offerToR).senderPeerId === 'peer-b', 'Signaling reaches the resumed socket');
+
+  // 14. Without a reconnect, the seat is released after the grace period
+  wsR2.terminate();
+  const t0 = Date.now();
+  while (!leftEvents.includes('user-left:peer-r') && Date.now() - t0 < 3000) await new Promise(r => setTimeout(r, 50));
+  assert(leftEvents.includes('user-left:peer-r'), 'Peer is announced as left once the grace period expires');
+
+  // 15. A different session with the same peerId (app restarted) is a fresh join
+  leftEvents.length = 0;
+  const wsS1 = await openWs();
+  wsS1.send(JSON.stringify({ type: 'join', roomId: 'voz-1', peerId: 'peer-s', username: 'Restarter', sessionId: 'old' }));
+  await new Promise(r => setTimeout(r, 150));
+  wsS1.terminate();
+  await new Promise(r => setTimeout(r, 50));
+  const wsS2 = await openWs();
+  const freshP = waitForMsg(wsS2, m => m.type === 'room-users');
+  wsS2.send(JSON.stringify({ type: 'join', roomId: 'voz-1', peerId: 'peer-s', username: 'Restarter', sessionId: 'new' }));
+  const fresh = await freshP;
+  await new Promise(r => setTimeout(r, 150));
+  assert(!fresh.resumed && leftEvents.includes('user-left:peer-s') && leftEvents.includes('user-joined:peer-s'), 'New app session with the same peerId is treated as leave + join');
+  wsB.off('message', leftListener);
+  wsS2.close();
+
+  // 16. ICE (TURN) configuration from environment variables
+  process.env.TURN_URLS = 'turn:turn.example.com:3478,turns:turn.example.com:5349';
+  process.env.TURN_USERNAME = 'u';
+  process.env.TURN_CREDENTIAL = 'p';
+  server.iceConfigCache = null;
+  const wsI = new WebSocket(`ws://127.0.0.1:${testPort}`);
+  const iceP = waitForMsg(wsI, m => m.type === 'ice-config');
+  const ice = await iceP;
+  assert(ice.iceServers.length === 1 && ice.iceServers[0].urls.length === 2 && ice.iceServers[0].username === 'u', 'Server sends TURN config from TURN_URLS/TURN_USERNAME/TURN_CREDENTIAL');
+  wsI.close();
+  delete process.env.TURN_URLS; delete process.env.TURN_USERNAME; delete process.env.TURN_CREDENTIAL;
+
   wsB.close();
   await server.close();
 
