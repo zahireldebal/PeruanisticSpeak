@@ -1,12 +1,19 @@
-const { app, BrowserWindow, globalShortcut, ipcMain, desktopCapturer, session } = require('electron');
+const { app, BrowserWindow, ipcMain, desktopCapturer, session } = require('electron');
 const path = require('path');
+const { GlobalShortcuts } = require('./shortcuts');
+const { initUpdater } = require('./updater');
+
+// One instance only: a second launch (or the updater relaunching) focuses the existing window
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+}
 
 let mainWindow = null;
 let pendingScreenSourceId = null;
 // 'loopbackWithoutChrome' = system audio minus our own process tree (no feedback loop).
 // The renderer can fall back to plain 'loopback' if this mode is rejected.
 let screenAudioMode = 'loopbackWithoutChrome';
-let currentShortcuts = {
+const DEFAULT_SHORTCUTS = {
   toggleMute: 'Ctrl+Shift+M',
   toggleDeafen: 'Ctrl+Shift+D',
   toggleScreen: 'Ctrl+Shift+S',
@@ -76,41 +83,27 @@ function createWindow() {
   });
 }
 
-function registerShortcuts(shortcuts) {
-  // Clear any existing registered shortcuts
-  globalShortcut.unregisterAll();
-  currentShortcuts = { ...currentShortcuts, ...shortcuts };
-
-  // Helper to register safely
-  const bindKey = (accelerator, action) => {
-    if (!accelerator || typeof accelerator !== 'string') return;
-    try {
-      const success = globalShortcut.register(accelerator, () => {
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          console.log(`[Electron] Global shortcut triggered: ${action} (${accelerator})`);
-          mainWindow.webContents.send('shortcut-triggered', action);
-        }
-      });
-      if (success) {
-        console.log(`[Electron] Registered global shortcut: ${action} -> ${accelerator}`);
-      } else {
-        console.warn(`[Electron] Could not register global shortcut: ${accelerator}`);
-      }
-    } catch (err) {
-      console.warn(`[Electron] Failed to register accelerator "${accelerator}":`, err.message);
-    }
-  };
-
-  bindKey(currentShortcuts.toggleMute, 'toggleMute');
-  bindKey(currentShortcuts.toggleDeafen, 'toggleDeafen');
-  bindKey(currentShortcuts.toggleScreen, 'toggleScreen');
-  bindKey(currentShortcuts.ptt, 'pttDown');
-}
+// Global shortcuts (keyboard + mouse hook; detects PTT key release)
+const shortcuts = new GlobalShortcuts((action) => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('shortcut-triggered', action);
+  }
+});
 
 // App Lifecycle
+app.on('second-instance', () => {
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+  }
+});
+
 app.whenReady().then(() => {
   createWindow();
-  registerShortcuts(currentShortcuts);
+  shortcuts.start();
+  // The renderer sends the user's saved shortcuts as soon as it loads
+  shortcuts.update(DEFAULT_SHORTCUTS);
+  initUpdater(() => mainWindow);
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -120,7 +113,7 @@ app.whenReady().then(() => {
 });
 
 app.on('will-quit', () => {
-  globalShortcut.unregisterAll();
+  shortcuts.stop();
 });
 
 app.on('window-all-closed', () => {
@@ -151,7 +144,7 @@ ipcMain.on('window-close', () => {
 // IPC Dynamic Shortcuts update
 ipcMain.on('update-shortcuts', (_event, newShortcuts) => {
   console.log('[Electron] Updating shortcuts from renderer:', newShortcuts);
-  registerShortcuts(newShortcuts);
+  shortcuts.update({ ...DEFAULT_SHORTCUTS, ...newShortcuts });
 });
 
 // IPC Screen Capture Sources (Desktop Capturer)

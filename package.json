@@ -1,6 +1,6 @@
 {
   "name": "peruanisticspeak",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Ultra-lightweight gaming voice, screen-sharing and chat client",
   "main": "electron/main.js",
   "type": "commonjs",
@@ -13,7 +13,8 @@
     "test:client": "node client/tests/webrtc.test.js",
     "test": "node server/tests/signaling.test.js && node client/tests/webrtc.test.js",
     "pack": "electron-builder --dir",
-    "dist": "electron-builder --win nsis"
+    "dist": "electron-builder --win nsis --publish never",
+    "release": "electron-builder --win nsis --publish always"
   },
   "build": {
     "appId": "com.zahireldebal.peruanisticspeak",
@@ -43,7 +44,15 @@
       "installerIcon": "client/public/icon.ico",
       "uninstallerIcon": "client/public/icon.ico",
       "deleteAppDataOnUninstall": false
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "zahireldebal",
+        "repo": "PeruanisticSpeak",
+        "releaseType": "release"
+      }
+    ]
   },
   "keywords": [
     "webrtc",
@@ -55,6 +64,8 @@
   "author": "zahir el debal",
   "license": "MIT",
   "dependencies": {
+    "electron-updater": "^6.8.11",
+    "uiohook-napi": "^1.5.5",
     "ws": "^8.22.2"
   },
   "devDependencies": {

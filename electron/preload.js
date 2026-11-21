@@ -18,6 +18,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('shortcut-triggered', (_event, action) => callback(action));
   },
 
+  // Auto-update (GitHub Releases)
+  getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+  getUpdateStatus: () => ipcRenderer.invoke('get-update-status'),
+  checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
+  installUpdate: () => ipcRenderer.invoke('install-update'),
+  onUpdateStatus: (callback) => {
+    ipcRenderer.on('update-status', (_event, status) => callback(status));
+  },
+
   // Screen capture source selection
   getScreenSources: async () => {
     return await ipcRenderer.invoke('get-screen-sources');

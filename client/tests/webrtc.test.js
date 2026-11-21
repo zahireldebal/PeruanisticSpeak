@@ -57,6 +57,25 @@ async function runClientTests() {
   client.handleMessage({ type: 'server-state', rooms: { 'voz-1': [] } });
   assert(serverStateRooms && serverStateRooms['voz-1'], 'SignalingClient correctly emits server-state');
 
+  // 1b. Ping: overdue reply reported as "+N ms" (internet dropped but socket still open)
+  global.WebSocket = global.WebSocket || { OPEN: 1 };
+  const pc1 = new SignalingClient('ws://fake-host:3001');
+  const pingSent = [];
+  pc1.ws = { readyState: 1, send: (d) => pingSent.push(JSON.parse(d)) };
+  const pings = [];
+  pc1.on('ping', (ms, overdue) => pings.push({ ms, overdue }));
+  SignalingClient.PING_INTERVAL_MS = 50;
+  pc1.startPing();
+  pc1.handleMessage({ type: 'pong', t: pingSent[0].t });
+  assert(pings[0] && pings[0].overdue === false && pings[0].ms >= 0, 'Pong produces a latency value in ms');
+  await new Promise(r => setTimeout(r, 70)); // next ping goes out
+  pc1.pendingPingAt -= 6000; // pretend it was sent 6 s ago with no answer
+  await new Promise(r => setTimeout(r, 70));
+  const overdue = pings.find(p => p.overdue);
+  assert(overdue && overdue.ms > 5000, `Unanswered ping is reported as overdue (${overdue && overdue.ms} ms)`);
+  pc1.stopPing();
+  SignalingClient.PING_INTERVAL_MS = 2000;
+
   // 2. AudioManager logic
   const audio = new AudioManager();
   assert(audio.isMuted === false, 'AudioManager starts unmuted');
@@ -199,7 +218,15 @@ async function runClientTests() {
   assert(pm.peerConnections.get('peer_c') === pcC3, 'Transient disconnect keeps the connection (recovery instead of drop)');
   pcC3.connectionState = 'failed';
   pcC3.onconnectionstatechange();
-  assert(pcC3.iceRestarted === 1, 'Failed connection triggers an ICE restart');
+  assert(pm.peerMeta.get('peer_c').isPolite && !pcC3.iceRestarted, 'Polite side does not restart ICE right away (avoids restart glare)');
+  sig.handleMessage({ type: 'user-joined', peerId: 'peer_a', username: 'A' });
+  const pcA = pm.peerConnections.get('peer_a');
+  pcA.connectionState = 'failed';
+  pcA.onconnectionstatechange();
+  assert(!pm.peerMeta.get('peer_a').isPolite && pcA.iceRestarted === 1, 'Impolite side restarts ICE when the connection fails');
+  pcA.connectionState = 'connected';
+  pcA.onconnectionstatechange();
+  assert(pm.peerMeta.get('peer_a').recoveryTimer === null, 'Recovery stops once connected again');
 
   // Per-user volume
   assert(pm.getPeerVolume('peer_c') === 100, 'Default user volume is 100%');
@@ -223,6 +250,22 @@ async function runClientTests() {
   sig.handleMessage({ type: 'room-users', roomId: 'voz-1', peers: [{ peerId: 'peer_e', username: 'E' }] });
   await pm.peerConnections.get('peer_e').onnegotiationneeded();
   assert(sent.some(m => m.type === 'offer' && m.targetPeerId === 'peer_e'), 'Newcomer offers immediately to existing members');
+
+  // Session resume keeps healthy calls and drops peers that are gone
+  const pcE = pm.peerConnections.get('peer_e');
+  pcE.connectionState = 'connected';
+  sig.handleMessage({ type: 'room-users', roomId: 'voz-1', resumed: true, peers: [{ peerId: 'peer_e', username: 'E' }] });
+  assert(pm.peerConnections.get('peer_e') === pcE && !pcE.closed, 'Resumed session keeps the connected call (no reset)');
+  assert(!pm.peerConnections.has('peer_c') && !pm.peerConnections.has('peer_d'), 'Resumed session closes connections to peers no longer in the room');
+
+  // TURN servers from the signaling server are used for new connections
+  sig.handleMessage({ type: 'ice-config', iceServers: [{ urls: ['turn:t.example:3478'], username: 'u', credential: 'p' }] });
+  assert(pm.hasTurn && pm.rtcConfig.iceServers.some(s => [].concat(s.urls).includes('turn:t.example:3478')), 'ICE config from the server adds TURN');
+
+  // join carries the session id (lets the server resume our seat)
+  sent.length = 0;
+  sig.joinRoom('voz-1', 'peer_b', 'B');
+  assert(sent[0].type === 'join' && sent[0].sessionId === sig.sessionId && sig.sessionId.length > 8, 'join includes the app session id');
   pm.destroy();
 
   // 4. SoundEffects methods

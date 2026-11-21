@@ -605,6 +605,62 @@ button.watch-stream-btn:hover {
   color: var(--danger-color);
 }
 
+/* Ping indicator (ms to the server, like Discord / TeamSpeak) */
+.ping-pill {
+  font-variant-numeric: tabular-nums;
+  cursor: default;
+}
+
+.ping-pill .ping-bar {
+  fill: var(--text-muted);
+  opacity: 0.35;
+}
+
+.ping-pill.good { color: var(--success-color); }
+.ping-pill.good .ping-bar { fill: var(--success-color); opacity: 1; }
+
+.ping-pill.ok { color: #f0b232; }
+.ping-pill.ok .ping-bar.b1,
+.ping-pill.ok .ping-bar.b2 { fill: #f0b232; opacity: 1; }
+
+.ping-pill.bad,
+.ping-pill.offline { color: var(--danger-color); }
+.ping-pill.bad .ping-bar.b1 { fill: var(--danger-color); opacity: 1; }
+
+.card-ping {
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+.card-ping.ok { color: #f0b232; }
+.card-ping.bad { color: var(--danger-color); }
+
+/* Auto-update banner (titlebar) */
+.update-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 auto 0 16px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  -webkit-app-region: no-drag;
+  min-width: 0;
+}
+
+.update-banner #updateBannerText {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.update-banner .btn {
+  padding: 2px 10px;
+  font-size: 11px;
+}
+
 .topbar-actions {
   display: flex;
   align-items: center;

@@ -5,7 +5,7 @@
  */
 
 document.addEventListener('DOMContentLoaded', async () => {
-  console.log('[App] Initializing PeruanisticSPEAK v1.0.2...');
+  console.log('[App] Initializing PeruanisticSPEAK v1.0.3...');
 
   const EMOJIS = [
     '😀', '😂', '🤣', '😎', '🔥', '💀', '🎮',
@@ -25,9 +25,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     avatar: localStorage.getItem('ps_avatar') || null,
     serverUrl: localStorage.getItem('ps_server_url') || DEFAULT_SERVER_URL,
     theme: localStorage.getItem('ps_theme') || 'dark',
-    currentRoom: 'voz-1',
+    currentRoom: null, // no voice channel until the user picks one
     activeTextChannel: 'general',
-    isConnectedToVoice: true,
+    isConnectedToVoice: false,
     activeScreenOwner: null,
     attachedImage: null,
     screenPreset: '720p',
@@ -102,6 +102,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     screenViewerCount: document.getElementById('screenViewerCount'),
     screenOverlayActions: document.getElementById('screenOverlayActions'),
     btnToggleFullscreen: document.getElementById('btnToggleFullscreen'),
+    btnLeaveStream: document.getElementById('btnLeaveStream'),
     btnStopScreenShareOverlay: document.getElementById('btnStopScreenShareOverlay'),
     emptyScreenState: document.getElementById('emptyScreenState'),
     btnStartScreenFromEmpty: document.getElementById('btnStartScreenFromEmpty'),
@@ -202,12 +203,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   el.toggleEchoCancellation.checked = !!audio.audioProcessing.echoCancellation;
   el.toggleAutoGain.checked = !!audio.audioProcessing.autoGainControl;
 
-  // Initialize Microphone asynchronously without blocking UI listeners
-  audio.init().then(() => {
-    populateAudioDevices();
-  }).catch((err) => {
-    console.warn('[App] Microphone init note:', err);
-  });
+  // The microphone is opened when joining a voice channel (or opening audio settings),
+  // not at startup: we no longer join a voice channel automatically.
+  function ensureMicrophone() {
+    if (audio.audioTrack || audio._initPromise) return audio._initPromise || Promise.resolve();
+    audio._initPromise = audio.init()
+      .then(() => populateAudioDevices())
+      .catch((err) => console.warn('[App] Microphone init note:', err))
+      .finally(() => { audio._initPromise = null; });
+    return audio._initPromise;
+  }
 
   // Connect to Signaling Server
   function connectSignaling() {
@@ -223,13 +228,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   // -------------------------------------------------------------
   // Signaling Connection Lifecycle
   // -------------------------------------------------------------
+  // (SignalingClient re-joins the current voice channel by itself after a reconnect)
   signaling.on('connected', () => {
     el.serverStatusDot.classList.remove('disconnected');
-    if (state.isConnectedToVoice && state.currentRoom) {
-      el.rtcStatusPill.classList.remove('disconnected');
-      el.rtcStatusText.textContent = 'Voz Conectada';
-      signaling.joinRoom(state.currentRoom, state.peerId, state.username, state.avatar);
-    }
+    updateVoiceStatusPill();
   });
 
   signaling.on('disconnected', () => {
@@ -237,6 +239,71 @@ document.addEventListener('DOMContentLoaded', async () => {
     el.rtcStatusPill.classList.add('disconnected');
     el.rtcStatusText.textContent = 'Reconectando...';
   });
+
+  function updateVoiceStatusPill() {
+    const inVoice = state.isConnectedToVoice && state.currentRoom;
+    el.rtcStatusPill.classList.toggle('disconnected', !inVoice || !signaling.isConnected);
+    if (!signaling.isConnected) {
+      el.rtcStatusText.textContent = 'Reconectando...';
+    } else {
+      el.rtcStatusText.textContent = inVoice ? 'Voz Conectada' : 'Sin canal de voz';
+    }
+  }
+
+  // -------------------------------------------------------------
+  // Ping (ms) — server latency, plus per-user latency on each card
+  // -------------------------------------------------------------
+  const pingPill = document.getElementById('pingPill');
+  const pingText = document.getElementById('pingText');
+  const peerRtts = new Map();
+
+  function pingClass(ms) {
+    if (ms === null || ms === undefined) return 'offline';
+    if (ms < 100) return 'good';
+    if (ms < 250) return 'ok';
+    return 'bad';
+  }
+
+  signaling.on('ping', (ms, overdue) => {
+    pingPill.classList.remove('good', 'ok', 'bad', 'offline');
+    if (ms === null || ms === undefined) {
+      pingText.textContent = 'Sin conexión';
+      pingPill.classList.add('offline');
+      pingPill.title = 'Sin conexión con el servidor';
+      return;
+    }
+    // While a reply is overdue show the time already waited, e.g. "+5000 ms"
+    pingText.textContent = overdue ? `+${Math.floor(ms / 1000) * 1000} ms` : `${ms} ms`;
+    pingPill.classList.add(overdue ? 'bad' : pingClass(ms));
+    pingPill.title = overdue
+      ? 'El servidor no responde: posible caída de internet'
+      : `Latencia al servidor: ${ms} ms`;
+  });
+
+  async function refreshPeerRtts() {
+    if (!state.isConnectedToVoice) return;
+    for (const peerId of peers.peerStates.keys()) {
+      const rtt = await peers.getPeerRtt(peerId);
+      peerRtts.set(peerId, rtt);
+      const label = document.getElementById(`ping-peer-${peerId}`);
+      if (label) renderPeerPing(label, rtt);
+    }
+  }
+
+  function renderPeerPing(label, rtt) {
+    label.classList.remove('ok', 'bad');
+    if (rtt === null || rtt === undefined) {
+      label.textContent = '';
+      label.title = '';
+      return;
+    }
+    label.textContent = `${rtt} ms`;
+    label.title = `Latencia directa con este usuario: ${rtt} ms`;
+    const cls = pingClass(rtt);
+    if (cls === 'ok' || cls === 'bad') label.classList.add(cls);
+  }
+
+  setInterval(refreshPeerRtts, 3000);
 
   // Unique Nickname rejection handler (Feature 3)
   signaling.on('server-error', (err) => {
@@ -344,9 +411,22 @@ document.addEventListener('DOMContentLoaded', async () => {
     displayScreenStream(stream, peerName, describeRemoteStream(stream), false, peerId);
   });
 
+  // "Dejar de ver": stop receiving this stream (the sender stops sending it to us)
+  let leavingStream = false;
+  el.btnLeaveStream.addEventListener('click', () => {
+    const owner = state.activeScreenOwner;
+    if (!owner || owner === state.peerId) return;
+    leavingStream = true;
+    peers.setWatchingScreen(owner, false);
+    if (state.activeScreenOwner === owner) clearScreenStream();
+    leavingStream = false;
+    renderParticipants();
+  });
+
   peers.on('remote-screen-removed', (peerId) => {
     if (state.activeScreenOwner === peerId) {
       clearScreenStream();
+      if (leavingStream) return; // the user left on purpose: don't jump to another stream
       // Another friend is still streaming? Switch to it automatically.
       for (const [otherId, otherStream] of peers.remoteScreenStreams.entries()) {
         if (otherId !== peerId) {
@@ -364,6 +444,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // "VER" on a LIVE user: show their stream, or ask them to resend it if it never arrived
   function watchPeerStream(peerId) {
+    if (peers.notWatching.has(peerId)) {
+      // We had left this stream: receive it again (it shows up when the video arrives)
+      peers.setWatchingScreen(peerId, true);
+      return;
+    }
     const stream = peers.remoteScreenStreams.get(peerId);
     if (stream) {
       watchRemoteScreen(peerId, stream);
@@ -406,9 +491,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (isLocal) {
       el.screenViewerBadge.style.display = 'flex';
       el.btnStopScreenShareOverlay.style.display = 'inline-flex';
+      el.btnLeaveStream.style.display = 'none';
     } else {
       el.screenViewerBadge.style.display = 'none';
       el.btnStopScreenShareOverlay.style.display = 'none';
+      el.btnLeaveStream.style.display = 'inline-flex';
     }
   }
 
@@ -424,6 +511,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   function clearScreenStream() {
+    el.btnLeaveStream.style.display = 'none';
     if (document.fullscreenElement === el.screenStage) {
       document.exitFullscreen().catch(() => {});
     }
@@ -499,11 +587,16 @@ document.addEventListener('DOMContentLoaded', async () => {
       badgesHtml += `<span title="Ensordecido" style="color:var(--danger-color); font-size:12px;">🎧</span>`;
     }
 
+    const pingLabel = user.peerId !== state.peerId
+      ? `<span class="card-ping" id="ping-peer-${escapeHtml(user.peerId)}"></span>`
+      : '';
     card.innerHTML = `
       ${avatarHtml}
       <div class="card-name">${escapeHtml(user.username)}</div>
-      <div class="card-badges">${badgesHtml}</div>
+      <div class="card-badges">${badgesHtml}${pingLabel}</div>
     `;
+    const pingEl = card.querySelector('.card-ping');
+    if (pingEl) renderPeerPing(pingEl, peerRtts.get(user.peerId));
     const watchBtn = card.querySelector('[data-watch-peer]');
     if (watchBtn) {
       watchBtn.addEventListener('click', (e) => {
@@ -765,9 +858,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       if (!state.isConnectedToVoice) {
         state.isConnectedToVoice = true;
-        el.rtcStatusPill.classList.remove('disconnected');
-        el.rtcStatusText.textContent = 'Voz Conectada';
-        audio.init().catch(e => console.warn(e));
+        ensureMicrophone();
       }
 
       el.channelItems.forEach(c => c.classList.remove('active'));
@@ -775,6 +866,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       state.currentRoom = chId;
       el.currentChannelHeader.textContent = chId;
+      updateVoiceStatusPill();
 
       // Join new room cleanly
       signaling.joinRoom(state.currentRoom, state.peerId, state.username, state.avatar);
@@ -807,9 +899,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     peers.destroy();
     state.isConnectedToVoice = false;
     state.currentRoom = null;
-    el.currentChannelHeader.textContent = 'Ninguno (Desconectado)';
-    el.rtcStatusPill.classList.add('disconnected');
-    el.rtcStatusText.textContent = 'Desconectado';
+    el.currentChannelHeader.textContent = 'Ninguno';
+    updateVoiceStatusPill();
     el.channelItems.forEach(c => c.classList.remove('active'));
     renderParticipants();
   });
@@ -1314,6 +1405,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   function openSettings() {
     el.settingsModal.classList.remove('hidden');
     populateAudioDevices();
+    ensureMicrophone(); // needed for the level meter and the voice test
   }
 
   function closeSettings() {
@@ -1482,30 +1574,65 @@ document.addEventListener('DOMContentLoaded', async () => {
     updateShortcutButtonsUI();
   }
 
+  // Physical key (KeyboardEvent.code) -> accelerator key name understood by Electron and by
+  // the global hook. Using `code` keeps "1" as "1" even with Shift held (e.key would be "!").
+  const CODE_TO_KEY = {
+    Space: 'Space', Enter: 'Enter', NumpadEnter: 'Enter', Tab: 'Tab', Backspace: 'Backspace',
+    Delete: 'Delete', Insert: 'Insert', Home: 'Home', End: 'End', PageUp: 'PageUp', PageDown: 'PageDown',
+    ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right', CapsLock: 'CapsLock',
+    Backquote: '`', Minus: '-', Equal: '=', BracketLeft: '[', BracketRight: ']', Backslash: '\\',
+    Semicolon: ';', Quote: "'", Comma: ',', Period: '.', Slash: '/', IntlBackslash: '\\',
+    NumpadAdd: 'numadd', NumpadSubtract: 'numsub', NumpadMultiply: 'nummult',
+    NumpadDivide: 'numdiv', NumpadDecimal: 'numdec'
+  };
+
+  function keyNameFromEvent(e) {
+    const code = e.code || '';
+    if (/^Key[A-Z]$/.test(code)) return code.slice(3);
+    if (/^Digit[0-9]$/.test(code)) return code.slice(5);
+    if (/^Numpad[0-9]$/.test(code)) return 'num' + code.slice(6);
+    if (/^F([1-9]|1[0-9]|2[0-4])$/.test(code)) return code;
+    if (CODE_TO_KEY[code]) return CODE_TO_KEY[code];
+    return null;
+  }
+
+  // Mouse side buttons are popular for push-to-talk
+  const MOUSE_KEY = { 1: 'Mouse3', 3: 'Mouse4', 4: 'Mouse5' };
+
+  function saveRecordedShortcut(accelerator) {
+    state.shortcuts[state.recordingAction] = accelerator;
+    localStorage.setItem('ps_shortcuts', JSON.stringify(state.shortcuts));
+    stopShortcutRecording();
+    syncShortcutsWithElectron();
+  }
+
+  window.addEventListener('mousedown', (e) => {
+    if (!state.recordingAction || !MOUSE_KEY[e.button]) return;
+    e.preventDefault();
+    e.stopPropagation();
+    saveRecordedShortcut(MOUSE_KEY[e.button]);
+  }, true);
+
   window.addEventListener('keydown', (e) => {
     // If recording a shortcut in settings
     if (state.recordingAction) {
       e.preventDefault();
       e.stopPropagation();
 
+      if (['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) return; // wait for the real key
+      if (e.key === 'Escape' && !e.ctrlKey && !e.shiftKey && !e.altKey) {
+        stopShortcutRecording();
+        return;
+      }
+      const keyName = keyNameFromEvent(e);
+      if (!keyName) return;
+
       const parts = [];
       if (e.ctrlKey) parts.push('Ctrl');
       if (e.shiftKey) parts.push('Shift');
       if (e.altKey) parts.push('Alt');
-
-      let keyName = e.key;
-      if (['Control', 'Shift', 'Alt'].includes(keyName)) return;
-
-      if (keyName === ' ') keyName = 'Space';
-      else if (keyName.length === 1) keyName = keyName.toUpperCase();
-
       parts.push(keyName);
-      const accelerator = parts.join('+');
-
-      state.shortcuts[state.recordingAction] = accelerator;
-      localStorage.setItem('ps_shortcuts', JSON.stringify(state.shortcuts));
-      stopShortcutRecording();
-      syncShortcutsWithElectron();
+      saveRecordedShortcut(parts.join('+'));
       return;
     }
 
@@ -1531,12 +1658,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     const hasCtrl = parts.includes('Ctrl');
     const hasShift = parts.includes('Shift');
     const hasAlt = parts.includes('Alt');
-
-    if (event.ctrlKey !== hasCtrl) return false;
-    if (event.shiftKey !== hasShift) return false;
-    if (event.altKey !== hasAlt) return false;
-
-    return event.key.toUpperCase() === key.toUpperCase() || event.code.toUpperCase() === key.toUpperCase();
+    const name = keyNameFromEvent(event);
+    if (!name || name.toUpperCase() !== key.toUpperCase()) return false;
+    // keyup of the PTT key must match even if a modifier was released first
+    if (event.type === 'keyup') return true;
+    const hasMods = hasCtrl || hasShift || hasAlt;
+    if (!hasMods) return true;
+    return event.ctrlKey === hasCtrl && event.shiftKey === hasShift && event.altKey === hasAlt;
   }
 
   function syncShortcutsWithElectron() {
@@ -1547,8 +1675,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Electron IPC Listeners
   if (window.electronAPI) {
-    if (window.electronAPI.onShortcut) {
-      window.electronAPI.onShortcut((action) => {
+    // Send the saved shortcuts to the main process right away (it starts with the defaults)
+    syncShortcutsWithElectron();
+
+    if (window.electronAPI.onShortcutTriggered) {
+      window.electronAPI.onShortcutTriggered((action) => {
         switch (action) {
           case 'toggleMute':
             audio.toggleMute();
@@ -1568,6 +1699,38 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
       });
     }
+
+    // Auto-update notice
+    const updateBanner = document.getElementById('updateBanner');
+    const updateBannerText = document.getElementById('updateBannerText');
+    const btnInstallUpdate = document.getElementById('btnInstallUpdate');
+    const showUpdateStatus = (status) => {
+      if (!status) return;
+      if (status.state === 'downloading') {
+        updateBanner.hidden = false;
+        btnInstallUpdate.hidden = true;
+        updateBannerText.textContent = `Descargando actualización v${status.version || ''}... ${status.percent || 0}%`;
+      } else if (status.state === 'ready') {
+        updateBanner.hidden = false;
+        btnInstallUpdate.hidden = false;
+        updateBannerText.textContent = `Nueva versión v${status.version} lista`;
+      } else {
+        updateBanner.hidden = true;
+      }
+    };
+    if (window.electronAPI.onUpdateStatus) {
+      window.electronAPI.onUpdateStatus(showUpdateStatus);
+      window.electronAPI.getUpdateStatus().then(showUpdateStatus).catch(() => {});
+      window.electronAPI.getAppVersion().then((v) => {
+        const badge = document.getElementById('appVersionBadge');
+        if (badge && v) badge.textContent = `v${v}`;
+      }).catch(() => {});
+    }
+    btnInstallUpdate.addEventListener('click', () => {
+      btnInstallUpdate.disabled = true;
+      updateBannerText.textContent = 'Instalando, la app se reiniciará...';
+      window.electronAPI.installUpdate();
+    });
 
     el.btnMinimize.addEventListener('click', () => window.electronAPI.minimize());
     el.btnMaximize.addEventListener('click', () => window.electronAPI.maximize());
