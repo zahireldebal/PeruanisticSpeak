@@ -52,7 +52,8 @@
         "repo": "PeruanisticSpeak",
         "releaseType": "release"
       }
-    ]
+    ],
+    "npmRebuild": false
   },
   "keywords": [
     "webrtc",

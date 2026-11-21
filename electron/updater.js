@@ -14,11 +14,15 @@ try {
 }
 
 const CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000;
-let lastStatus = { state: 'idle', currentVersion: app.getVersion() };
+// app.getVersion() is Electron's version when running unpackaged; package.json is always right
+const APP_VERSION = (() => {
+  try { return require('../package.json').version; } catch (_) { return app.getVersion(); }
+})();
+let lastStatus = { state: 'idle', currentVersion: APP_VERSION };
 let getWindow = () => null;
 
 function send(status) {
-  lastStatus = { ...status, currentVersion: app.getVersion() };
+  lastStatus = { ...status, currentVersion: APP_VERSION };
   const win = getWindow();
   if (win && !win.isDestroyed()) {
     win.webContents.send('update-status', lastStatus);
@@ -35,7 +39,7 @@ function check() {
 function initUpdater(windowGetter) {
   getWindow = windowGetter;
 
-  ipcMain.handle('get-app-version', () => app.getVersion());
+  ipcMain.handle('get-app-version', () => APP_VERSION);
   ipcMain.handle('get-update-status', () => lastStatus);
   ipcMain.handle('check-for-updates', () => { check(); return true; });
   ipcMain.handle('install-update', () => {
