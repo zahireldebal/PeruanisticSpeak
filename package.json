@@ -50,7 +50,7 @@
         "provider": "github",
         "owner": "zahireldebal",
         "repo": "PeruanisticSpeak",
-        "releaseType": "release"
+        "releaseType": "draft"
       }
     ],
     "npmRebuild": false

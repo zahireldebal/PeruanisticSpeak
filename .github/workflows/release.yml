@@ -15,9 +15,15 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: windows-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
@@ -41,7 +47,22 @@ jobs:
       - name: Test
         run: npm test
 
-      - name: Build and publish installer
+      # electron-builder uploads several files in parallel and can end up creating the release
+      # twice. Create exactly one draft first (removing leftovers for this tag); it uploads into it.
+      - name: Prepare a single draft release
+        shell: bash
+        run: |
+          for id in $(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq ".[] | select(.tag_name==\"$GITHUB_REF_NAME\") | .id"); do
+            echo "Removing existing release $id for $GITHUB_REF_NAME"
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id"
+          done
+          gh release create "$GITHUB_REF_NAME" --draft --verify-tag \
+            --title "${GITHUB_REF_NAME#v}" \
+            --notes "PeruanisticSPEAK ${GITHUB_REF_NAME}. Descarga el instalador .exe de abajo. Si ya tienes la 1.0.3 o superior, la app se actualiza sola."
+
+      - name: Build and upload installer
         run: npm run release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish release
+        shell: bash
+        run: gh release edit "$GITHUB_REF_NAME" --draft=false --latest
