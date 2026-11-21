@@ -19,13 +19,14 @@ class PeerManager {
     this.signalQueues = new Map(); // peerId -> Promise (serialized signaling work)
     this.peerVolumes = PeerManager.loadVolumes(); // peerId -> 0..100 (persisted per device)
 
-    this.rtcConfig = {
-      iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' }
-      ]
-    };
+    this.defaultIceServers = [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun.cloudflare.com:3478' }
+    ];
+    this.rtcConfig = { iceServers: this.defaultIceServers.slice() };
+    this.hasTurn = false;
+    this.notWatching = new Set(); // peerIds whose screen stream we chose to stop receiving
 
     this.listeners = new Map();
     this.setupListeners();
@@ -58,11 +59,35 @@ class PeerManager {
   }
 
   setupListeners() {
+    // TURN/STUN servers provided by the signaling server. Applies to connections created from
+    // now on (it arrives right after connecting, before we join a room).
+    this.signaling.on('ice-config', (servers) => {
+      if (!Array.isArray(servers) || servers.length === 0) return;
+      this.rtcConfig = { iceServers: [...this.defaultIceServers, ...servers] };
+      this.hasTurn = servers.some(sv => [].concat(sv.urls || []).some(u => /^turns?:/.test(u)));
+      console.log(`[PeerManager] ICE config received (${servers.length} servers, TURN: ${this.hasTurn})`);
+    });
+
     // Signaling room participants received (we just joined / re-joined)
-    this.signaling.on('room-users', (peers, roomId) => {
-      console.log(`[PeerManager] Joined room "${roomId}" with ${peers.length} active peers.`);
+    this.signaling.on('room-users', (peers, roomId, resumed) => {
+      console.log(`[PeerManager] Joined room "${roomId}" with ${peers.length} active peers${resumed ? ' (session resumed)' : ''}.`);
+      const listed = new Set(peers.map(p => p.peerId));
+      if (resumed) {
+        // Our socket dropped and came back within the grace period: the others never saw us
+        // leave, so keep every healthy call and only rebuild the broken ones.
+        for (const peerId of Array.from(this.peerConnections.keys())) {
+          if (!listed.has(peerId)) {
+            this.closePeer(peerId);
+            this.peerStates.delete(peerId);
+          }
+        }
+      }
       for (const peer of peers) {
         this.peerStates.set(peer.peerId, { ...peer });
+        const existing = this.peerConnections.get(peer.peerId);
+        if (resumed && existing && ['connected', 'connecting', 'new'].includes(existing.connectionState)) {
+          continue;
+        }
         // The server just told every other member that we (re)joined, so they are building a
         // fresh connection to us. Drop any stale one we still hold so both sides start clean.
         this.resetPeer(peer.peerId, { initiator: true });
@@ -144,6 +169,8 @@ class PeerManager {
       if (!isSharingScreen) {
         this.remoteScreenStreams.delete(peerId);
         this.emit('remote-screen-removed', peerId);
+        // Their next stream should reach us again
+        if (this.notWatching.has(peerId)) this.setWatchingScreen(peerId, true);
       }
     });
 
@@ -252,6 +279,7 @@ class PeerManager {
       videoTransceiver: null,
       screenAudioTransceiver: null,
       recoveryTimer: null,
+      recoveryStep: 0,
       connectTimer: null,
       holdTimer: null,
       holdOffers: options.initiator === false,
@@ -300,6 +328,10 @@ class PeerManager {
         }
         this.handleRemoteAudioTrack(peerId, track);
       } else if (track.kind === 'video') {
+        if (this.notWatching.has(peerId)) {
+          if (event.transceiver && event.transceiver.direction !== 'inactive') event.transceiver.direction = 'inactive';
+          return;
+        }
         this.handleRemoteVideoTrack(peerId, stream || new MediaStream([track]));
         this.signaling.sendWatchingScreen(peerId, true);
       }
@@ -366,13 +398,8 @@ class PeerManager {
     clearTimeout(meta.connectTimer);
     meta.connectTimer = setTimeout(() => {
       if (this.peerConnections.get(peerId) !== pc || pc.connectionState === 'connected') return;
-      if (meta.iceRestarts < PeerManager.MAX_ICE_RESTARTS) {
-        console.warn(`[PeerManager] ${peerId} still "${pc.connectionState}" after ${PeerManager.CONNECT_TIMEOUT_MS} ms, restarting ICE`);
-        this.restartIce(peerId, pc, meta);
-        this.armConnectWatchdog(peerId, pc, meta);
-      } else {
-        this.hardReset(peerId);
-      }
+      console.warn(`[PeerManager] ${peerId} still "${pc.connectionState}" after ${PeerManager.CONNECT_TIMEOUT_MS} ms`);
+      this.startRecovery(peerId, pc, meta);
     }, PeerManager.CONNECT_TIMEOUT_MS);
   }
 
@@ -383,16 +410,18 @@ class PeerManager {
       clearTimeout(meta.connectTimer);
       meta.recoveryTimer = null;
       meta.connectTimer = null;
+      meta.recoveryStep = 0;
       meta.iceRestarts = 0;
       return;
     }
 
     if (state === 'disconnected') {
-      // Usually transient (Wi-Fi blip, CPU spike). Give it a moment, then restart ICE.
-      clearTimeout(meta.recoveryTimer);
+      // Usually transient (Wi-Fi blip, CPU spike). Give it a moment before acting.
+      if (meta.recoveryTimer) return;
       meta.recoveryTimer = setTimeout(() => {
-        if (this.peerConnections.get(peerId) === pc && pc.connectionState === 'disconnected') {
-          this.restartIce(peerId, pc, meta);
+        meta.recoveryTimer = null;
+        if (this.peerConnections.get(peerId) === pc && pc.connectionState !== 'connected') {
+          this.startRecovery(peerId, pc, meta);
         }
       }, PeerManager.DISCONNECT_GRACE_MS);
       return;
@@ -400,18 +429,45 @@ class PeerManager {
 
     if (state === 'failed') {
       clearTimeout(meta.recoveryTimer);
-      if (meta.iceRestarts < PeerManager.MAX_ICE_RESTARTS) {
-        this.restartIce(peerId, pc, meta);
-        // If the ICE restart does not bring it back, rebuild the connection from scratch.
-        meta.recoveryTimer = setTimeout(() => {
-          if (this.peerConnections.get(peerId) === pc && pc.connectionState !== 'connected') {
-            this.hardReset(peerId);
-          }
-        }, PeerManager.FAILED_RESET_MS);
-      } else {
-        this.hardReset(peerId);
-      }
+      meta.recoveryTimer = null;
+      this.startRecovery(peerId, pc, meta);
     }
+  }
+
+  /**
+   * Escalating recovery for a connection that is not connected. Only the impolite side
+   * restarts ICE at first: if both restart at once their offers collide, and that rollback
+   * can stall ICE gathering. The polite side only steps in later in case the other end is
+   * stuck. Steps run every RECOVERY_STEP_MS until the connection is back:
+   *   impolite: ICE restart x MAX_ICE_RESTARTS, then rebuild the connection
+   *   polite:   wait, wait, ICE restart, ICE restart, then rebuild
+   */
+  startRecovery(peerId, pc, meta) {
+    if (meta.recoveryTimer) return; // a recovery loop is already running
+    const step = () => {
+      meta.recoveryTimer = null;
+      if (this.peerConnections.get(peerId) !== pc || pc.connectionState === 'connected') {
+        meta.recoveryStep = 0;
+        return;
+      }
+      meta.recoveryStep = (meta.recoveryStep || 0) + 1;
+      const n = meta.recoveryStep;
+      if (!meta.isPolite) {
+        if (n <= PeerManager.MAX_ICE_RESTARTS) {
+          this.restartIce(peerId, pc, meta);
+        } else {
+          this.hardReset(peerId, true);
+          return;
+        }
+      } else if (n === 3 || n === 4) {
+        this.restartIce(peerId, pc, meta);
+      } else if (n >= 5) {
+        this.hardReset(peerId, true);
+        return;
+      }
+      meta.recoveryTimer = setTimeout(step, PeerManager.RECOVERY_STEP_MS);
+    };
+    step();
   }
 
   restartIce(peerId, pc, meta) {
@@ -424,16 +480,16 @@ class PeerManager {
     }
   }
 
-  hardReset(peerId) {
+  hardReset(peerId, force = false) {
     if (!this.peerStates.has(peerId)) {
       this.closePeer(peerId);
       this.emit('peers-updated', Array.from(this.peerStates.values()));
       return;
     }
     const meta = this.peerMeta.get(peerId);
-    // Only the impolite side rebuilds; the polite side rebuilds when it receives the new
-    // (incompatible) offer. Avoids both sides tearing down each other's fresh connection.
-    if (meta && meta.isPolite) return;
+    // Normally only the impolite side rebuilds; the polite side rebuilds when it receives the
+    // new (incompatible) offer. `force` is the polite side's last resort.
+    if (meta && meta.isPolite && !force) return;
     console.warn(`[PeerManager] Rebuilding connection to ${peerId}`);
     this.resetPeer(peerId, { initiator: true });
   }
@@ -567,6 +623,74 @@ class PeerManager {
     stream.onremovetrack = (ev) => {
       if (ev.track && ev.track.kind === 'video') onGone();
     };
+  }
+
+  /** Round-trip time to a peer in ms (from the active ICE candidate pair), or null. */
+  async getPeerRtt(peerId) {
+    const pc = this.peerConnections.get(peerId);
+    if (!pc || pc.connectionState !== 'connected') return null;
+    try {
+      const stats = await pc.getStats();
+      let rtt = null;
+      stats.forEach((s) => {
+        if (s.type === 'transport' && s.selectedCandidatePairId) {
+          const pair = stats.get(s.selectedCandidatePairId);
+          if (pair && typeof pair.currentRoundTripTime === 'number') rtt = pair.currentRoundTripTime;
+        }
+      });
+      if (rtt === null) {
+        stats.forEach((s) => {
+          if (s.type === 'candidate-pair' && s.nominated && s.state === 'succeeded' && typeof s.currentRoundTripTime === 'number') {
+            rtt = s.currentRoundTripTime;
+          }
+        });
+      }
+      return rtt === null ? null : Math.round(rtt * 1000);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /** Transceivers on which a peer's screen video/audio reaches us. */
+  getRemoteScreenTransceivers(peerId) {
+    const pc = this.peerConnections.get(peerId);
+    const meta = this.peerMeta.get(peerId);
+    if (!pc || !meta) return [];
+    const stream = this.remoteScreenStreams.get(peerId);
+    return pc.getTransceivers().filter((t) => {
+      if (t === meta.micTransceiver || t === meta.videoTransceiver || t === meta.screenAudioTransceiver) return false;
+      if (!t.mid || t.stopped) return false;
+      const track = t.receiver && t.receiver.track;
+      if (!track) return false;
+      if (track.kind === 'video') return true;
+      // Screen audio: an audio track that belongs to their screen stream (not their mic)
+      return !!(stream && stream.getAudioTracks().includes(track)) || !!t._psScreenAudio;
+    });
+  }
+
+  /**
+   * Stop (or resume) receiving a peer's screen stream. Turning the receiving transceivers
+   * inactive makes the sender stop sending to us, which saves bandwidth (mobile data).
+   */
+  setWatchingScreen(peerId, watching) {
+    const transceivers = this.getRemoteScreenTransceivers(peerId);
+    if (watching) {
+      this.notWatching.delete(peerId);
+    } else {
+      this.notWatching.add(peerId);
+    }
+    for (const t of transceivers) {
+      if (t.receiver.track.kind === 'audio') t._psScreenAudio = true;
+      const dir = watching ? 'recvonly' : 'inactive';
+      if (t.direction !== dir) {
+        try { t.direction = dir; } catch (err) { console.warn('[PeerManager] setWatchingScreen:', err.message); }
+      }
+    }
+    if (!watching && this.remoteScreenStreams.has(peerId)) {
+      this.remoteScreenStreams.delete(peerId);
+      this.emit('remote-screen-removed', peerId);
+    }
+    this.signaling.sendWatchingScreen(peerId, watching);
   }
 
   /** Per-user voice volume, 0-100 (default 100). Persisted in localStorage by peerId. */
@@ -720,6 +844,7 @@ class PeerManager {
     }
 
     this.peerMeta.delete(peerId);
+    this.notWatching.delete(peerId);
 
     if (this.remoteAudioElements.has(peerId)) {
       const audioEl = this.remoteAudioElements.get(peerId);
@@ -743,7 +868,7 @@ class PeerManager {
 }
 
 PeerManager.DISCONNECT_GRACE_MS = 4000;
-PeerManager.FAILED_RESET_MS = 12000;
+PeerManager.RECOVERY_STEP_MS = 8000;
 PeerManager.MAX_ICE_RESTARTS = 3;
 PeerManager.OFFER_HOLD_MS = 3000;
 PeerManager.CONNECT_TIMEOUT_MS = 10000;
